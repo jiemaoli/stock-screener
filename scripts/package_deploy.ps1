@@ -33,6 +33,7 @@ try {
         --exclude=.coverage `
         --exclude=htmlcov `
         --exclude=data/cache `
+        --exclude=data/config `
         --exclude=data/logs `
         --exclude=data/daily_scans `
         --exclude=data/fundamentals_cache `

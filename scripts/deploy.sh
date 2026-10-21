@@ -20,6 +20,7 @@ find_archive() {
 }
 
 mkdir -p "$APP_DIR" "$LOG_DIR" "$APP_DIR/data/cache" \
+    "$APP_DIR/data/cache/price_history_5y" "$APP_DIR/data/config" \
     "$APP_DIR/data/daily_scans" "$APP_DIR/data/fundamentals_cache"
 
 ARCHIVE_PATH="$(find_archive || true)"
