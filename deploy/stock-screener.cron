@@ -1,0 +1,6 @@
+SHELL=/bin/sh
+PATH=/usr/local/bin:/usr/bin:/bin
+
+# Run after the US market close, Monday-Friday, using the container's
+# America/New_York timezone. flock prevents overlapping full scans.
+15 18 * * 1-5 root cd /app && /usr/bin/flock -n /app/data/.scan.lock /usr/local/bin/python run_optimized_scan.py --conservative --git-storage --clear-progress >> /app/data/logs/scheduler.log 2>&1

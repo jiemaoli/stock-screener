@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -26,11 +27,54 @@ app = Flask(__name__)
 PROJECT_ROOT = Path(__file__).parent.resolve()
 SCAN_DIR = PROJECT_ROOT / "data" / "daily_scans"
 VENV_PYTHON = PROJECT_ROOT / "venv" / "bin" / "python"
+SCAN_LOG_DIR = PROJECT_ROOT / "data" / "logs"
+SCAN_STATE_FILE = SCAN_LOG_DIR / "scan_job.json"
+SCAN_LOCK_FILE = PROJECT_ROOT / "data" / ".scan.lock"
+
+_scan_process = None
+_scan_guard = threading.Lock()
+
+
+def _read_scan_state():
+    if not SCAN_STATE_FILE.exists():
+        return {"status": "idle"}
+    try:
+        return json.loads(SCAN_STATE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"status": "unknown", "error": "Could not read scan state"}
+
+
+def _write_scan_state(state):
+    SCAN_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    temp_file = SCAN_STATE_FILE.with_suffix(".tmp")
+    temp_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    temp_file.replace(SCAN_STATE_FILE)
+
+
+def _process_is_running(process):
+    return process is not None and process.poll() is None
+
+
+def _monitor_scan(process, state, log_file):
+    global _scan_process
+    return_code = process.wait()
+    log_file.close()
+
+    with _scan_guard:
+        final_state = dict(state)
+        final_state["status"] = "completed" if return_code == 0 else "failed"
+        final_state["completed_at"] = datetime.now().astimezone().isoformat()
+        final_state["return_code"] = return_code
+        if return_code != 0:
+            final_state["error"] = "Scan process failed; check the scan log for details"
+        _write_scan_state(final_state)
+        if _scan_process is process:
+            _scan_process = None
 
 
 def parse_scan_file(filepath):
     """Parse a scan .txt file into structured data."""
-    text = Path(filepath).read_text()
+    text = Path(filepath).read_text(encoding="utf-8")
 
     data = {
         "scan_date": "",
@@ -196,7 +240,7 @@ def get_scan_files():
     if not SCAN_DIR.exists():
         return []
     files = sorted(SCAN_DIR.glob("optimized_scan_*.txt"), reverse=True)
-    return [{"name": f.stem, "path": str(f), "date": f.stem.replace("optimized_scan_", "")} for f in files]
+    return [{"name": f.stem, "path": f.name, "date": f.stem.replace("optimized_scan_", "")} for f in files]
 
 
 DASHBOARD_HTML = """
@@ -292,6 +336,7 @@ DASHBOARD_HTML = """
   @keyframes spin { to { transform: rotate(360deg); } }
 
   .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px; font-size: 13px; box-shadow: 0 4px 20px rgba(0,0,0,0.4); z-index: 100; transition: opacity 0.3s; }
+  .scan-status { color: var(--muted); font-size: 12px; align-self: center; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -302,6 +347,7 @@ DASHBOARD_HTML = """
     <div class="meta" id="headerMeta">Loading...</div>
   </div>
   <div class="actions">
+    <span class="scan-status" id="scanStatus">Idle</span>
     <select class="scan-select" id="scanSelect" onchange="loadScan(this.value)"></select>
     <button class="btn" onclick="runScan(false)" id="testBtn">Test Scan (100)</button>
     <button class="btn primary" onclick="runScan(true)" id="fullBtn">Full Scan</button>
@@ -373,9 +419,10 @@ DASHBOARD_HTML = """
 
 <script>
 let breadthChartInstance = null;
+let previousScanStatus = null;
 
 async function loadScanList() {
-  const res = await fetch('/api/scans');
+  const res = await fetch('api/scans');
   const scans = await res.json();
   const sel = document.getElementById('scanSelect');
   sel.innerHTML = '';
@@ -395,7 +442,7 @@ async function loadScanList() {
 }
 
 async function loadScan(path) {
-  const res = await fetch('/api/scan?path=' + encodeURIComponent(path));
+  const res = await fetch('api/scan?path=' + encodeURIComponent(path));
   const data = await res.json();
   if (data.error) {
     document.getElementById('noData').style.display = '';
@@ -569,31 +616,72 @@ function toggleReasons(btn) {
 }
 
 async function runScan(full) {
-  const btn = full ? document.getElementById('fullBtn') : document.getElementById('testBtn');
-  const origText = btn.textContent;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>' + (full ? 'Scanning...' : 'Testing...');
+  const confirmation = full
+    ? 'Confirm Full Scan? This scans the complete US stock universe and usually takes 60-90+ minutes.'
+    : 'Confirm Test Scan? This scans 100 stocks and usually takes about 2 minutes.';
+  if (!window.confirm(confirmation)) return;
 
-  showToast(full ? 'Full scan started — this takes 15-30 min...' : 'Test scan started (~1 min)...');
+  const btn = full ? document.getElementById('fullBtn') : document.getElementById('testBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Starting...';
 
   try {
-    const res = await fetch('/api/run-scan', {
+    const res = await fetch('api/run-scan', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({full: full})
     });
     const result = await res.json();
-    if (result.success) {
-      showToast('Scan complete! Loading results...');
-      await loadScanList();
+    if (res.ok && result.success) {
+      showToast(full ? 'Full scan started in the background.' : 'Test scan started in the background.');
+      previousScanStatus = 'running';
+      await refreshScanStatus();
     } else {
-      showToast('Scan failed: ' + (result.error || 'unknown error'));
+      showToast('Could not start scan: ' + (result.error || 'unknown error'));
+      await refreshScanStatus();
     }
   } catch (e) {
     showToast('Error: ' + e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = origText;
+    setScanButtons(false);
+  }
+}
+
+function setScanButtons(running, full = false) {
+  const testBtn = document.getElementById('testBtn');
+  const fullBtn = document.getElementById('fullBtn');
+  testBtn.disabled = running;
+  fullBtn.disabled = running;
+  testBtn.textContent = running && !full ? 'Test Scanning...' : 'Test Scan (100)';
+  fullBtn.textContent = running && full ? 'Full Scanning...' : 'Full Scan';
+}
+
+async function refreshScanStatus() {
+  try {
+    const res = await fetch('api/scan-status');
+    const state = await res.json();
+    const statusEl = document.getElementById('scanStatus');
+
+    if (state.status === 'running') {
+      setScanButtons(true, state.full === true);
+      const kind = state.full ? 'Full scan' : 'Test scan';
+      statusEl.innerHTML = '<span class="spinner"></span>' + kind + ' running';
+    } else {
+      setScanButtons(false);
+      statusEl.textContent = state.status === 'failed' ? 'Last scan failed' : 'Idle';
+
+      if (previousScanStatus === 'running') {
+        if (state.status === 'completed') {
+          showToast('Scan complete! Loading results...');
+          await loadScanList();
+        } else if (state.status === 'failed') {
+          showToast('Scan failed. Check the scan log for details.');
+        }
+      }
+    }
+
+    previousScanStatus = state.status;
+  } catch (e) {
+    document.getElementById('scanStatus').textContent = 'Status unavailable';
   }
 }
 
@@ -607,6 +695,8 @@ function showToast(msg) {
 }
 
 loadScanList();
+refreshScanStatus();
+setInterval(refreshScanStatus, 5000);
 </script>
 </body>
 </html>
@@ -625,15 +715,16 @@ def api_scans():
 
 @app.route("/api/scan")
 def api_scan():
-    path = request.args.get("path", "")
-    if not path:
-        latest = SCAN_DIR / "latest_optimized_scan.txt"
-        if latest.exists():
-            path = str(latest)
-        else:
-            return jsonify({"error": "No scan data"})
+    requested_path = request.args.get("path", "")
+    if requested_path:
+        path = (SCAN_DIR / requested_path).resolve()
+        scan_root = SCAN_DIR.resolve()
+        if path.parent != scan_root or not path.name.startswith("optimized_scan_") or path.suffix != ".txt":
+            return jsonify({"error": "Invalid scan path"}), 400
+    else:
+        path = (SCAN_DIR / "latest_optimized_scan.txt").resolve()
 
-    if not Path(path).exists():
+    if not path.exists():
         return jsonify({"error": "File not found"})
 
     return jsonify(parse_scan_file(path))
@@ -641,30 +732,79 @@ def api_scan():
 
 @app.route("/api/run-scan", methods=["POST"])
 def api_run_scan():
+    global _scan_process
     body = request.json or {}
-    full = body.get("full", False)
+    full = body.get("full") is True
 
-    python = str(VENV_PYTHON) if VENV_PYTHON.exists() else sys.executable
-    cmd = [python, "run_optimized_scan.py"]
-    if not full:
-        cmd.append("--test-mode")
+    with _scan_guard:
+        if _process_is_running(_scan_process):
+            return jsonify({"success": False, "error": "A scan is already running"}), 409
 
-    try:
-        result = subprocess.run(
-            cmd,
+        lock_check = subprocess.run(
+            ["/usr/bin/flock", "-n", str(SCAN_LOCK_FILE), "true"],
             capture_output=True,
-            text=True,
-            timeout=2400,
-            cwd=str(Path(__file__).parent),
         )
-        if result.returncode == 0:
-            return jsonify({"success": True})
-        else:
-            return jsonify({"success": False, "error": result.stderr[-500:] if result.stderr else "Unknown error"})
-    except subprocess.TimeoutExpired:
-        return jsonify({"success": False, "error": "Scan timed out (40 min limit)"})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        if lock_check.returncode != 0:
+            return jsonify({"success": False, "error": "A scheduled or manual scan is already running"}), 409
+
+        python = str(VENV_PYTHON) if VENV_PYTHON.exists() else sys.executable
+        cmd = [
+            "/usr/bin/flock",
+            "-n",
+            str(SCAN_LOCK_FILE),
+            python,
+            "run_optimized_scan.py",
+            "--conservative",
+            "--git-storage",
+            "--clear-progress",
+        ]
+        if not full:
+            cmd.append("--test-mode")
+
+        SCAN_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = SCAN_LOG_DIR / f"web_scan_{timestamp}.log"
+        log_file = log_path.open("w", encoding="utf-8")
+
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                cwd=str(PROJECT_ROOT),
+                start_new_session=True,
+            )
+        except Exception:
+            log_file.close()
+            raise
+
+        state = {
+            "status": "running",
+            "full": full,
+            "pid": process.pid,
+            "started_at": datetime.now().astimezone().isoformat(),
+            "log": log_path.name,
+        }
+        _scan_process = process
+        _write_scan_state(state)
+
+        monitor = threading.Thread(
+            target=_monitor_scan,
+            args=(process, state, log_file),
+            daemon=True,
+        )
+        monitor.start()
+
+    return jsonify({"success": True, **state}), 202
+
+
+@app.route("/api/scan-status")
+def api_scan_status():
+    with _scan_guard:
+        state = _read_scan_state()
+        if _process_is_running(_scan_process):
+            state["status"] = "running"
+        return jsonify(state)
 
 
 def open_browser(port):

@@ -115,7 +115,7 @@ def score_buy_signal(
     - Entry quality: 5 points
     - VCP pattern bonus: +5 points (if valid VCP detected)
 
-    Threshold: >= 70 for signals
+    Production optimized-scan threshold: >= 60 for signals
 
     Args:
         ticker: Stock ticker

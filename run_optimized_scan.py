@@ -32,6 +32,7 @@ from src.screening.benchmark import (
 )
 from src.screening.signal_engine import score_buy_signal, score_sell_signal
 from src.data.enhanced_fundamentals import EnhancedFundamentalsFetcher
+from src.notifications.telegram_notifier import TelegramNotifier
 
 logging.basicConfig(
     level=logging.INFO,
@@ -90,7 +91,7 @@ def save_report(results, buy_signals, sell_signals, spy_analysis, breadth, outpu
 
     # Buy signals
     output.append("="*80)
-    output.append(f"🟢 TOP BUY SIGNALS (Score >= 70) - {len(buy_signals)} Total")
+    output.append(f"🟢 TOP BUY SIGNALS (Score >= 60) - {len(buy_signals)} Total")
     output.append("="*80)
     output.append("")
 
@@ -267,11 +268,11 @@ def save_report(results, buy_signals, sell_signals, spy_analysis, breadth, outpu
 
     # Save
     filepath = Path(output_dir) / f"optimized_scan_{timestamp}.txt"
-    with open(filepath, 'w') as f:
+    with open(filepath, 'w', encoding='utf-8') as f:
         f.write(report_text)
 
     latest_path = Path(output_dir) / "latest_optimized_scan.txt"
-    with open(latest_path, 'w') as f:
+    with open(latest_path, 'w', encoding='utf-8') as f:
         f.write(report_text)
 
     logger.info(f"Report saved: {filepath}")
@@ -413,7 +414,16 @@ def main():
         sell_signals = sorted(sell_signals, key=lambda x: x['score'], reverse=True)
 
         # Report
-        save_report(results, buy_signals, sell_signals, spy_analysis, breadth)
+        report_path = save_report(results, buy_signals, sell_signals, spy_analysis, breadth)
+
+        TelegramNotifier().send_scan_summary(
+            buy_signals=buy_signals,
+            sell_signals=sell_signals,
+            spy_analysis=spy_analysis,
+            breadth=breadth,
+            report_path=report_path,
+            is_test=args.test_mode,
+        )
 
         # Show FMP usage if enabled
         if args.use_fmp:

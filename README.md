@@ -1,5 +1,7 @@
 # Intelligent Stock Screener
 
+> VPS 部署、运行机制、Telegram 通知和选股逻辑请见：[中文部署与使用指南](docs/%E4%B8%AD%E6%96%87%E9%83%A8%E7%BD%B2%E4%B8%8E%E4%BD%BF%E7%94%A8%E6%8C%87%E5%8D%97.md)
+
 > **A production-grade systematic trading system for identifying high-probability stock setups using phase-based technical analysis, relative strength momentum, and smart fundamental screening.**
 
 [![Python](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/)

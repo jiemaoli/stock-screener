@@ -2,6 +2,8 @@
 .env
 .env.local
 .env.*.local
+*.htpasswd
+.initial_credentials
 
 # Python
 __pycache__/

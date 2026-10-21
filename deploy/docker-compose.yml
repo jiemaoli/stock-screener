@@ -1,0 +1,63 @@
+name: stock-screener
+
+services:
+  dashboard:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: stock-screener:latest
+    container_name: stock-screener-dashboard
+    restart: unless-stopped
+    environment:
+      - TZ=America/New_York
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ../data:/app/data
+      - ../.env:/app/.env:ro
+    networks:
+      - default
+      - infra-net
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5050/api/scans"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+        reservations:
+          memory: 256M
+
+  scheduler:
+    image: stock-screener:latest
+    container_name: stock-screener-scheduler
+    restart: unless-stopped
+    depends_on:
+      dashboard:
+        condition: service_healthy
+    environment:
+      - TZ=America/New_York
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ../data:/app/data
+      - ../.env:/app/.env:ro
+    command: ["cron", "-f"]
+    networks:
+      - default
+      - infra-net
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          memory: 512M
+
+networks:
+  default:
+  infra-net:
+    external: true
+    name: infrastructure_infra-net

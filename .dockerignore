@@ -1,0 +1,14 @@
+.git
+.github
+.env
+.env.*
+*.htpasswd
+.initial_credentials
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.coverage
+htmlcov
+data/cache
+data/logs
