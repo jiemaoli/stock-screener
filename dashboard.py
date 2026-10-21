@@ -12,24 +12,40 @@ import argparse
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Timer
+from zoneinfo import ZoneInfo
 
-from flask import Flask, jsonify, render_template_string, request
-
-app = Flask(__name__)
+from flask import Flask, jsonify, redirect, render_template_string, request, session, url_for
+from dotenv import load_dotenv
+from werkzeug.security import check_password_hash
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
+load_dotenv(PROJECT_ROOT / ".env")
+
+app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or secrets.token_hex(32)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "true").lower() == "true",
+    SESSION_COOKIE_SAMESITE="Lax",
+    PERMANENT_SESSION_LIFETIME=timedelta(days=7),
+)
+
 SCAN_DIR = PROJECT_ROOT / "data" / "daily_scans"
 VENV_PYTHON = PROJECT_ROOT / "venv" / "bin" / "python"
 SCAN_LOG_DIR = PROJECT_ROOT / "data" / "logs"
 SCAN_STATE_FILE = SCAN_LOG_DIR / "scan_job.json"
 SCAN_LOCK_FILE = PROJECT_ROOT / "data" / ".scan.lock"
+SCHEDULE_CONFIG_FILE = PROJECT_ROOT / "data" / "config" / "schedule.json"
+SCHEDULER_STATE_FILE = PROJECT_ROOT / "data" / "logs" / "scheduler_state.json"
 SCAN_COMMAND_ARGS = [
     "run_optimized_scan.py",
     "--conservative",
@@ -110,8 +126,108 @@ SYSTEM_INFO = {
     ],
 }
 
+
+def _build_system_info():
+    info = json.loads(json.dumps(SYSTEM_INFO, ensure_ascii=False))
+    config = _read_schedule_config()
+    weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    selected_days = "、".join(weekday_names[index] for index in config["weekdays"])
+    info["schedule"].update(config)
+    info["schedule"].update(
+        {
+            "cron": f"{config['minute']} {config['hour']} * * "
+            + ",".join(str((day + 1) % 7) for day in config["weekdays"]),
+            "description": f"{selected_days}，美东时间 {config['hour']:02d}:{config['minute']:02d}",
+            "next_run": _next_schedule_times(config),
+            "state": _read_json_file(SCHEDULER_STATE_FILE, {}),
+        }
+    )
+    return info
+
+
+def _read_json_file(path, default):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return default
+
 _scan_process = None
 _scan_guard = threading.Lock()
+_login_attempts = {}
+_login_guard = threading.Lock()
+
+DEFAULT_SCHEDULE = {
+    "enabled": True,
+    "timezone": "America/New_York",
+    "weekdays": [0, 1, 2, 3, 4],
+    "hour": 18,
+    "minute": 15,
+}
+
+
+def _read_schedule_config():
+    config = dict(DEFAULT_SCHEDULE)
+    if SCHEDULE_CONFIG_FILE.exists():
+        try:
+            saved = json.loads(SCHEDULE_CONFIG_FILE.read_text(encoding="utf-8"))
+            config.update({key: saved[key] for key in DEFAULT_SCHEDULE if key in saved})
+        except (OSError, json.JSONDecodeError, TypeError):
+            pass
+    return config
+
+
+def _write_schedule_config(config):
+    SCHEDULE_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = SCHEDULE_CONFIG_FILE.with_suffix(".tmp")
+    temp_file.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_file.replace(SCHEDULE_CONFIG_FILE)
+
+
+def _next_schedule_times(config):
+    if not config.get("enabled"):
+        return {"new_york": None, "beijing": None}
+
+    eastern = ZoneInfo("America/New_York")
+    beijing = ZoneInfo("Asia/Shanghai")
+    now_eastern = datetime.now(timezone.utc).astimezone(eastern)
+    weekdays = set(config.get("weekdays", []))
+
+    for offset in range(15):
+        day = now_eastern.date() + timedelta(days=offset)
+        if day.weekday() not in weekdays:
+            continue
+        candidate = datetime(
+            day.year,
+            day.month,
+            day.day,
+            int(config["hour"]),
+            int(config["minute"]),
+            tzinfo=eastern,
+        )
+        if candidate > now_eastern:
+            return {
+                "new_york": candidate.isoformat(),
+                "beijing": candidate.astimezone(beijing).isoformat(),
+            }
+    return {"new_york": None, "beijing": None}
+
+
+def _login_is_rate_limited(ip_address):
+    now = time.time()
+    with _login_guard:
+        recent = [attempt for attempt in _login_attempts.get(ip_address, []) if now - attempt < 300]
+        _login_attempts[ip_address] = recent
+        return len(recent) >= 5
+
+
+def _record_login_failure(ip_address):
+    with _login_guard:
+        _login_attempts.setdefault(ip_address, []).append(time.time())
+
+
+def _clear_login_failures(ip_address):
+    with _login_guard:
+        _login_attempts.pop(ip_address, None)
 
 
 def _read_scan_state():
@@ -322,6 +438,45 @@ def get_scan_files():
     return [{"name": f.stem, "path": f.name, "date": f.stem.replace("optimized_scan_", "")} for f in files]
 
 
+LOGIN_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录·美股选股系统</title>
+<style>
+  :root { --bg:#0f1117; --surface:#1a1d27; --border:#2a2d3a; --text:#e4e6eb; --muted:#8b8fa3; --blue:#3b82f6; --red:#ef4444; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; padding:20px; background:radial-gradient(circle at top, #18233b 0, var(--bg) 48%); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+  .login-card { width:100%; max-width:400px; background:rgba(26,29,39,.96); border:1px solid var(--border); border-radius:16px; padding:32px; box-shadow:0 24px 70px rgba(0,0,0,.4); }
+  .logo { width:48px; height:48px; display:grid; place-items:center; border-radius:12px; background:rgba(59,130,246,.15); color:#60a5fa; font-size:24px; margin-bottom:18px; }
+  h1 { font-size:22px; margin:0 0 8px; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:24px; }
+  label { display:block; color:var(--muted); font-size:12px; margin:14px 0 6px; }
+  input { width:100%; padding:11px 12px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); outline:none; }
+  input:focus { border-color:var(--blue); }
+  button { width:100%; margin-top:22px; padding:11px; border:0; border-radius:8px; background:var(--blue); color:white; font-weight:600; cursor:pointer; }
+  .error { margin:14px 0 0; color:#fca5a5; background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.25); border-radius:7px; padding:9px 10px; font-size:12px; }
+</style>
+</head>
+<body>
+  <form class="login-card" method="post" autocomplete="on">
+    <div class="logo">📈</div>
+    <h1>美股选股系统</h1>
+    <div class="sub">登录后查看扫描结果、定时任务和选股规则</div>
+    <label for="username">账号</label>
+    <input id="username" name="username" type="text" required autofocus autocomplete="username">
+    <label for="password">密码</label>
+    <input id="password" name="password" type="password" required autocomplete="current-password">
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <button type="submit">登录</button>
+  </form>
+</body>
+</html>
+"""
+
+
 DASHBOARD_HTML = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -428,6 +583,18 @@ DASHBOARD_HTML = """
   details.rule-group summary { cursor: pointer; padding: 16px 20px; font-size: 14px; font-weight: 600; }
   details.rule-group .detail-content { padding: 0 20px 20px; }
   .notice { padding: 12px 14px; border-left: 3px solid var(--yellow); background: rgba(234,179,8,.08); color: var(--muted); border-radius: 4px; font-size: 12px; line-height: 1.7; }
+  .tab-nav { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+  .tab-btn { border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); padding: 11px 16px; cursor: pointer; font-size: 14px; }
+  .tab-btn.active { color: var(--text); border-bottom-color: var(--blue); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  .form-row { display: grid; grid-template-columns: 160px 1fr; gap: 16px; align-items: center; margin-bottom: 16px; }
+  .form-row label { font-size: 13px; color: var(--muted); }
+  .form-control { width: 100%; max-width: 360px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 9px 10px; }
+  .weekday-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .weekday-item { display: flex; gap: 5px; align-items: center; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+  .next-run { font-size: 14px; line-height: 1.9; }
+  .next-run strong { color: var(--blue); }
   @media (max-width: 760px) {
     .header { padding: 14px 16px; align-items: flex-start; gap: 12px; flex-direction: column; }
     .container { padding: 16px; }
@@ -446,15 +613,26 @@ DASHBOARD_HTML = """
     <select class="scan-select" id="scanSelect" onchange="loadScan(this.value)"></select>
     <button class="btn" onclick="runScan(false)" id="testBtn">测试扫描（100只）</button>
     <button class="btn primary" onclick="runScan(true)" id="fullBtn">全量扫描</button>
+    <form method="post" action="{{ url_for('logout') }}" style="margin:0">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="btn" type="submit">退出</button>
+    </form>
   </div>
 </div>
 
 <div class="container" id="content">
-  <div class="no-data" id="noData" style="display:none">
-    <h2>暂无扫描数据</h2>
-    <p>请先运行一次测试扫描</p>
+  <div class="tab-nav">
+    <button class="tab-btn active" data-tab="dashboardTab" onclick="showTab('dashboardTab', this)">扫描结果</button>
+    <button class="tab-btn" data-tab="scheduleTab" onclick="showTab('scheduleTab', this)">定时任务</button>
+    <button class="tab-btn" data-tab="rulesTab" onclick="showTab('rulesTab', this)">选股规则</button>
   </div>
-  <div id="dashboard" style="display:none">
+
+  <section class="tab-panel active" id="dashboardTab">
+    <div class="no-data" id="noData" style="display:none">
+      <h2>暂无扫描数据</h2>
+      <p>请先运行一次测试扫描</p>
+    </div>
+    <div id="dashboard" style="display:none">
 
     <div class="stats-row" id="statsRow"></div>
 
@@ -509,16 +687,23 @@ DASHBOARD_HTML = """
       </div>
     </div>
 
-    <h2 class="section-title">系统运行机制与选股规则</h2>
-    <div id="systemInfo"><div class="card">正在加载系统配置...</div></div>
+    </div>
+  </section>
 
-  </div>
+  <section class="tab-panel" id="scheduleTab">
+    <div id="scheduleInfo"><div class="card">正在加载定时任务配置...</div></div>
+  </section>
+
+  <section class="tab-panel" id="rulesTab">
+    <div id="rulesInfo"><div class="card">正在加载选股规则...</div></div>
+  </section>
 </div>
 
 <script>
 let breadthChartInstance = null;
 let previousScanStatus = null;
 let systemInfoData = null;
+const csrfToken = {{ csrf_token | tojson }};
 
 const phaseNames = {1: 'Phase 1（筑底/盘整）', 2: 'Phase 2（上升趋势）', 3: 'Phase 3（派发/见顶）', 4: 'Phase 4（下降趋势）'};
 const trendNames = {Bullish: '上涨', Bearish: '下跌', Consolidating: '盘整', Topping: '见顶', Unknown: '未知'};
@@ -570,34 +755,52 @@ function rows(items, points = false) {
 function renderSystemInfo(info) {
   const schedule = info.schedule;
   const runtime = info.runtime;
-  document.getElementById('systemInfo').innerHTML = `
-    <div class="info-grid" style="margin-bottom:16px">
+  const weekdayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  const timeValue = `${String(schedule.hour).padStart(2, '0')}:${String(schedule.minute).padStart(2, '0')}`;
+  const nextNewYork = schedule.next_run && schedule.next_run.new_york ? new Date(schedule.next_run.new_york).toLocaleString('zh-CN', {timeZone: 'America/New_York', hour12: false}) : '已停用或暂无';
+  const nextBeijing = schedule.next_run && schedule.next_run.beijing ? new Date(schedule.next_run.beijing).toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai', hour12: false}) : '已停用或暂无';
+  const schedulerState = schedule.state || {};
+  const schedulerStatusNames = {running: '运行中', completed: '已完成', failed: '失败'};
+
+  document.getElementById('scheduleInfo').innerHTML = `
+    <div class="grid-2">
       <div class="card">
-        <h2>定时任务</h2>
-        <ul class="info-list">
-          <li><strong>执行时间：</strong>${schedule.description}</li>
-          <li><strong>北京时间：</strong>${schedule.beijing_time}</li>
-          <li><strong>Cron：</strong><code>${schedule.cron}</code></li>
-          <li><strong>时区：</strong>${schedule.timezone}</li>
-          <li><strong>防重复：</strong>${schedule.overlap_protection}</li>
-        </ul>
+        <h2>定时任务配置</h2>
+        <div class="form-row"><label>启用自动扫描</label><div><input type="checkbox" id="scheduleEnabled" ${schedule.enabled ? 'checked' : ''}></div></div>
+        <div class="form-row"><label>执行时区</label><div><input class="form-control" value="America/New_York（美东时间）" disabled></div></div>
+        <div class="form-row"><label>美东执行时间</label><div><input class="form-control" type="time" id="scheduleTime" value="${timeValue}"></div></div>
+        <div class="form-row"><label>执行星期</label><div class="weekday-list">${weekdayNames.map((name, index) => `<label class="weekday-item"><input type="checkbox" name="weekday" value="${index}" ${schedule.weekdays.includes(index) ? 'checked' : ''}>${name}</label>`).join('')}</div></div>
+        <button class="btn primary" onclick="saveSchedule()">保存定时任务</button>
+        <span id="scheduleSaveStatus" style="margin-left:10px;color:var(--muted);font-size:12px"></span>
+      </div>
+      <div class="card">
+        <h2>下次运行时间</h2>
+        <div class="next-run">
+          <div>纽约时间：<strong>${nextNewYork}</strong></div>
+          <div>北京时间：<strong>${nextBeijing}</strong></div>
+          <div>上次定时任务：<strong>${schedulerStatusNames[schedulerState.status] || '暂无记录'}</strong></div>
+        </div>
+        <div class="notice" style="margin-top:16px">服务器和调度器始终以美东时区计算。页面同时换算北京时间，并自动处理美国夏令时与冬令时，无需手工调整时差。</div>
         <div class="code-block">${schedule.command}</div>
       </div>
-      <div class="card">
-        <h2>扫描运行方式</h2>
-        <ul class="info-list">
-          <li><strong>股票池：</strong>${runtime.universe_size}</li>
-          <li><strong>测试扫描：</strong>${runtime.test_size} 只</li>
-          <li><strong>全量耗时：</strong>${runtime.full_scan_time}</li>
-          <li><strong>并发：</strong>${runtime.workers} 个工作线程，但价格请求受全局限速控制</li>
-          <li><strong>请求节奏：</strong>${runtime.request_delay}</li>
-          <li><strong>价格数据：</strong>${runtime.price_refresh}</li>
-          <li><strong>基本面缓存：</strong>${runtime.fundamental_cache}</li>
-          <li><strong>Telegram：</strong>${runtime.telegram}</li>
-        </ul>
-      </div>
     </div>
-    <div class="notice" style="margin-bottom:16px"><strong>为什么每天全量扫描都很慢：</strong>目前不是只补当天行情，而是每次逐只重新下载 5 年价格历史并执行回撤检查。基本面缓存不会消除这些价格请求，所以每天通常仍需 60–90 分钟。要明显提速，需要改成批量下载或价格历史增量更新。</div>
+    <div class="card" style="margin-top:16px">
+      <h2>扫描运行方式</h2>
+      <ul class="info-list">
+        <li><strong>股票池：</strong>${runtime.universe_size}</li>
+        <li><strong>测试扫描：</strong>${runtime.test_size} 只</li>
+        <li><strong>全量耗时：</strong>${runtime.full_scan_time}</li>
+        <li><strong>并发：</strong>${runtime.workers} 个工作线程，但价格请求受全局限速控制</li>
+        <li><strong>请求节奏：</strong>${runtime.request_delay}</li>
+        <li><strong>价格数据：</strong>${runtime.price_refresh}</li>
+        <li><strong>基本面缓存：</strong>${runtime.fundamental_cache}</li>
+        <li><strong>Telegram：</strong>${runtime.telegram}</li>
+        <li><strong>防止重叠：</strong>${schedule.overlap_protection}</li>
+      </ul>
+    </div>`;
+
+  document.getElementById('rulesInfo').innerHTML = `
+    <div class="notice" style="margin-bottom:16px"><strong>为什么当前全量扫描很慢：</strong>五年数据用于“最大回撤超过 90%”的历史风险过滤，但当前实现为了简单，每天逐只重新下载完整五年数据，再截取最近约 252 个交易日做技术分析。这个设计能保证数据新鲜，却造成不必要的重复下载。合理优化是首次建立五年缓存，之后增量补最新交易日，并定期校验完整历史。</div>
     <details class="rule-group" open>
       <summary>股票池初筛与市场环境门槛</summary>
       <div class="detail-content">
@@ -626,6 +829,38 @@ function renderSystemInfo(info) {
       <div class="detail-content"><table class="param-table"><thead><tr><th>参数</th><th>含义</th></tr></thead><tbody>${info.terms.map(x => `<tr><td><strong>${x.name}</strong></td><td>${x.meaning}</td></tr>`).join('')}</tbody></table></div>
     </details>
   `;
+}
+
+function showTab(tabId, button) {
+  document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.toggle('active', panel.id === tabId));
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn === button));
+  if (tabId === 'dashboardTab' && breadthChartInstance) breadthChartInstance.resize();
+}
+
+async function saveSchedule() {
+  const weekdays = Array.from(document.querySelectorAll('input[name="weekday"]:checked')).map(input => Number(input.value));
+  const [hour, minute] = document.getElementById('scheduleTime').value.split(':').map(Number);
+  const status = document.getElementById('scheduleSaveStatus');
+  if (weekdays.length === 0) {
+    status.textContent = '请至少选择一个执行日';
+    return;
+  }
+  status.textContent = '正在保存...';
+  try {
+    const response = await fetch('api/schedule', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+      body: JSON.stringify({enabled: document.getElementById('scheduleEnabled').checked, weekdays, hour, minute})
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || '保存失败');
+    systemInfoData = result;
+    renderSystemInfo(result);
+    document.getElementById('scheduleSaveStatus').textContent = '保存成功';
+    showToast('定时任务配置已更新，无需重启容器。');
+  } catch (error) {
+    status.textContent = error.message;
+  }
 }
 
 async function loadScanList() {
@@ -920,9 +1155,67 @@ setInterval(refreshScanStatus, 5000);
 """
 
 
+@app.before_request
+def require_login():
+    if request.endpoint in {"login", "healthz"}:
+        return None
+    if session.get("authenticated"):
+        return None
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "请先登录"}), 401
+    return redirect(url_for("login", next=request.full_path if request.query_string else request.path))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if session.get("authenticated"):
+        return redirect(url_for("index"))
+
+    error = None
+    if request.method == "POST":
+        ip_address = request.headers.get("X-Real-IP") or request.remote_addr or "unknown"
+        if _login_is_rate_limited(ip_address):
+            error = "尝试次数过多，请 5 分钟后再试"
+        else:
+            expected_username = os.getenv("DASHBOARD_USERNAME", "stock")
+            password_hash = os.getenv("DASHBOARD_PASSWORD_HASH", "")
+            username = request.form.get("username", "")
+            password = request.form.get("password", "")
+
+            if password_hash and secrets.compare_digest(username, expected_username) and check_password_hash(password_hash, password):
+                _clear_login_failures(ip_address)
+                session.clear()
+                session["authenticated"] = True
+                session["username"] = username
+                session["csrf_token"] = secrets.token_urlsafe(32)
+                session.permanent = True
+                next_url = request.args.get("next", "")
+                if not next_url.startswith("/") or next_url.startswith("//"):
+                    next_url = url_for("index")
+                return redirect(next_url)
+
+            _record_login_failure(ip_address)
+            error = "账号或密码不正确"
+
+    return render_template_string(LOGIN_HTML, error=error)
+
+
+@app.route("/healthz")
+def healthz():
+    return jsonify({"status": "ok"})
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    if not secrets.compare_digest(request.form.get("csrf_token", ""), session.get("csrf_token", "")):
+        return "Invalid CSRF token", 400
+    session.clear()
+    return redirect(url_for("login"))
+
+
 @app.route("/")
 def index():
-    return render_template_string(DASHBOARD_HTML)
+    return render_template_string(DASHBOARD_HTML, csrf_token=session["csrf_token"])
 
 
 @app.route("/api/scans")
@@ -932,7 +1225,37 @@ def api_scans():
 
 @app.route("/api/system-info")
 def api_system_info():
-    return jsonify(SYSTEM_INFO)
+    return jsonify(_build_system_info())
+
+
+@app.route("/api/schedule", methods=["PUT"])
+def api_schedule():
+    if not secrets.compare_digest(request.headers.get("X-CSRF-Token", ""), session.get("csrf_token", "")):
+        return jsonify({"error": "CSRF 校验失败"}), 400
+
+    body = request.get_json(silent=True) or {}
+    try:
+        enabled = body.get("enabled") is True
+        weekdays = sorted({int(day) for day in body.get("weekdays", [])})
+        hour = int(body.get("hour"))
+        minute = int(body.get("minute"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "定时任务参数格式不正确"}), 400
+
+    if not weekdays or any(day < 0 or day > 6 for day in weekdays):
+        return jsonify({"error": "请至少选择一个有效执行日"}), 400
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return jsonify({"error": "执行时间不正确"}), 400
+
+    config = {
+        "enabled": enabled,
+        "timezone": "America/New_York",
+        "weekdays": weekdays,
+        "hour": hour,
+        "minute": minute,
+    }
+    _write_schedule_config(config)
+    return jsonify(_build_system_info())
 
 
 @app.route("/api/scan")

@@ -8,7 +8,6 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    cron \
     curl \
     git \
     tzdata \
@@ -22,10 +21,7 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-COPY deploy/stock-screener.cron /etc/cron.d/stock-screener
-
-RUN chmod 0644 /etc/cron.d/stock-screener \
-    && mkdir -p /app/data/cache /app/data/daily_scans /app/data/fundamentals_cache /app/data/logs
+RUN mkdir -p /app/data/cache /app/data/daily_scans /app/data/fundamentals_cache /app/data/logs /app/data/config
 
 EXPOSE 5050
 

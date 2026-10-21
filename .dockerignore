@@ -12,3 +12,7 @@ __pycache__
 htmlcov
 data/cache
 data/logs
+data/config
+data/daily_scans
+data/fundamentals_cache
+data/position_reports

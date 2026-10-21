@@ -18,7 +18,7 @@ services:
       - default
       - infra-net
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5050/api/scans"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5050/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -44,7 +44,7 @@ services:
     volumes:
       - ../data:/app/data
       - ../.env:/app/.env:ro
-    command: ["cron", "-f"]
+    command: ["python", "scheduler_service.py"]
     networks:
       - default
       - infra-net

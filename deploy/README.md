@@ -10,8 +10,10 @@ The production deployment follows the existing `/root/apps` and
 - Reverse proxy: the existing Nginx container at `stock-min.hhxs.top`
 
 The `dashboard` service serves the Flask application with Gunicorn. The
-`scheduler` service runs a conservative full-market scan at 18:15 New York
-time on weekdays. Both services share the persistent `data` directory.
+`scheduler` service reads its enabled state, weekdays and New York execution
+time from `data/config/schedule.json`; these settings are editable in the Web
+UI and take effect without rebuilding containers. Both services share the
+persistent `data` directory and scan lock.
 
 Useful commands:
 
