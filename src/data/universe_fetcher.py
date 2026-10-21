@@ -65,7 +65,7 @@ class USStockUniverseFetcher:
         sp500 = self._normalize_index_symbols(sp_tables[0]["Symbol"].tolist())
 
         ndx_response = requests.get(
-            "https://en.wikipedia.org/wiki/Nasdaq-100",
+            "https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies",
             headers=headers,
             timeout=30,
         )
