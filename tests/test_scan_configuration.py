@@ -122,3 +122,29 @@ def test_test_scan_does_not_replace_latest_full_report(tmp_path, monkeypatch):
     assert latest_full.read_text(encoding="utf-8") == "existing production report"
     assert (tmp_path / "latest_test_scan.txt").exists()
     assert (tmp_path / "latest_test_scan.json").exists()
+
+
+def test_scan_history_lists_only_timestamped_formal_reports(tmp_path, monkeypatch):
+    import dashboard
+
+    monkeypatch.setattr(dashboard, "SCAN_DIR", tmp_path)
+    (tmp_path / "optimized_scan_20261021_104338.txt").write_text(
+        "Total Universe: 518 stocks\n", encoding="utf-8"
+    )
+    (tmp_path / "optimized_scan_20261021_041701.txt").write_text(
+        "Total Universe: 100 stocks\n", encoding="utf-8"
+    )
+    (tmp_path / "latest_optimized_scan.txt").write_text(
+        "Total Universe: 518 stocks\n", encoding="utf-8"
+    )
+    (tmp_path / "test_scan_20261021_120000.txt").write_text(
+        "Total Universe: 100 stocks\n", encoding="utf-8"
+    )
+
+    reports = dashboard.get_scan_files()
+
+    assert [report["name"] for report in reports] == [
+        "optimized_scan_20261021_104338.txt",
+        "optimized_scan_20261021_041701.txt",
+    ]
+    assert [report["total_universe"] for report in reports] == [518, 100]

@@ -447,6 +447,43 @@ def parse_scan_file(filepath):
     return data
 
 
+def get_scan_files():
+    """Return formal full-scan reports, newest first, with universe size."""
+    reports = []
+    if not SCAN_DIR.exists():
+        return reports
+
+    for path in sorted(SCAN_DIR.glob("optimized_scan_*.txt"), reverse=True):
+        match = re.fullmatch(r"optimized_scan_(\d{8})_(\d{6})\.txt", path.name)
+        if not match:
+            continue
+
+        total_universe = None
+        try:
+            with path.open("r", encoding="utf-8") as report:
+                for _ in range(20):
+                    line = report.readline()
+                    if not line:
+                        break
+                    universe_match = re.search(r"Total Universe:\s*([\d,]+)", line)
+                    if universe_match:
+                        total_universe = int(universe_match.group(1).replace(",", ""))
+                        break
+        except OSError:
+            continue
+
+        reports.append(
+            {
+                "name": path.name,
+                "path": path.name,
+                "date": f"{match.group(1)}_{match.group(2)}",
+                "total_universe": total_universe,
+            }
+        )
+
+    return reports
+
+
 LOGIN_HTML = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -579,6 +616,7 @@ DASHBOARD_HTML = """
 
   .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px; font-size: 13px; box-shadow: 0 4px 20px rgba(0,0,0,0.4); z-index: 100; transition: opacity 0.3s; }
   .scan-status { color: var(--muted); font-size: 12px; align-self: center; white-space: nowrap; }
+  .scan-select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 6px; font-size: 13px; }
   .section-title { font-size: 18px; margin: 30px 0 14px; }
   .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
   .info-list { padding-left: 20px; color: var(--muted); font-size: 13px; line-height: 1.75; }
@@ -618,6 +656,7 @@ DASHBOARD_HTML = """
   </div>
   <div class="actions">
     <span class="scan-status" id="scanStatus">空闲</span>
+    <select class="scan-select" id="scanSelect" onchange="loadScan(this.value)" aria-label="历史全量扫描记录"></select>
     <button class="btn" onclick="runScan(false)" id="testBtn">测试扫描（100只）</button>
     <button class="btn primary" onclick="runScan(true)" id="fullBtn">全量扫描</button>
     <form method="post" action="{{ url_for('logout') }}" style="margin:0">
@@ -919,10 +958,32 @@ async function saveScanSettings() {
   }
 }
 
-async function loadLatestScan() {
-  const res = await fetch('api/scan');
+async function loadScanList() {
+  const select = document.getElementById('scanSelect');
+  const res = await fetch('api/scans');
+  const scans = await res.json();
+  if (!res.ok || !Array.isArray(scans) || scans.length === 0) {
+    select.innerHTML = '<option value="">暂无全量扫描记录</option>';
+    select.disabled = true;
+    document.getElementById('noData').style.display = '';
+    document.getElementById('dashboard').style.display = 'none';
+    return;
+  }
+
+  select.disabled = false;
+  select.innerHTML = scans.map((scan) => {
+    const date = scan.date.replace('_', ' ');
+    const universe = scan.total_universe == null ? '数量未知' : `${scan.total_universe.toLocaleString()}只`;
+    return `<option value="${scan.path}">${date} · ${universe}</option>`;
+  }).join('');
+  await loadScan(scans[0].path);
+}
+
+async function loadScan(path) {
+  if (!path) return;
+  const res = await fetch('api/scan?path=' + encodeURIComponent(path));
   const data = await res.json();
-  if (data.error) {
+  if (!res.ok || data.error) {
     document.getElementById('noData').style.display = '';
     document.getElementById('dashboard').style.display = 'none';
     return;
@@ -1163,7 +1224,7 @@ async function refreshScanStatus() {
         if (state.status === 'completed') {
           if (state.full === true) {
             showToast('全量扫描完成，正在加载最新结果...');
-            await loadLatestScan();
+            await loadScanList();
           } else {
             showToast('测试扫描完成，正式 Dashboard 结果未被替换。');
           }
@@ -1188,7 +1249,7 @@ function showToast(msg) {
   t._timer = setTimeout(() => { t.style.opacity = '0'; }, 5000);
 }
 
-loadLatestScan();
+loadScanList();
 loadSystemInfo();
 refreshScanStatus();
 setInterval(refreshScanStatus, 5000);
@@ -1313,12 +1374,28 @@ def api_scan_settings():
 
 @app.route("/api/scan")
 def api_scan():
-    path = (SCAN_DIR / "latest_optimized_scan.txt").resolve()
+    requested_path = request.args.get("path", "")
+    if requested_path:
+        requested_name = Path(requested_path).name
+        if requested_name != requested_path or not re.fullmatch(
+            r"optimized_scan_\d{8}_\d{6}\.txt", requested_name
+        ):
+            return jsonify({"error": "Invalid scan path"}), 400
+        path = (SCAN_DIR / requested_name).resolve()
+        if path.parent != SCAN_DIR.resolve():
+            return jsonify({"error": "Invalid scan path"}), 400
+    else:
+        path = (SCAN_DIR / "latest_optimized_scan.txt").resolve()
 
     if not path.exists():
-        return jsonify({"error": "File not found"})
+        return jsonify({"error": "File not found"}), 404
 
     return jsonify(parse_scan_file(path))
+
+
+@app.route("/api/scans")
+def api_scans():
+    return jsonify(get_scan_files())
 
 
 @app.route("/api/run-scan", methods=["POST"])
