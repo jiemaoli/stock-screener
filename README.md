@@ -34,6 +34,25 @@
 
 ## Overview
 
+### fin_twt screening API
+
+The dashboard service exposes a token-protected internal API using the shared screening schema `1.0`:
+
+```http
+POST /api/v1/screen
+Authorization: Bearer <SCREENER_API_TOKEN>
+Content-Type: application/json
+
+{
+  "strategy": "stage2_breakout",
+  "market": "US",
+  "limit": 10,
+  "parameters": { "universe": "configured" }
+}
+```
+
+Full-market scans are asynchronous. Poll `GET /api/v1/screen/{run_id}` until `status` is `completed` or `failed`. Completed responses return normalized `candidates` while retaining provider-specific metrics under each candidate's `details` field. These routes are intended for the shared Docker network and are blocked by the public Nginx configuration.
+
 **Intelligent Stock Screener** is a fully automated, data-driven stock screening and position management system that scans 3,800+ US stocks daily to identify high-conviction buy and sell signals based on:
 
 - **Phase-based trend classification** (4-stage market cycle analysis)

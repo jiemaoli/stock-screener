@@ -37,6 +37,7 @@ logs/
 .coverage
 htmlcov/
 .pytest_cache/
+.pytest-codex-release/
 
 # Data (keep cache and scan archives)
 data/*

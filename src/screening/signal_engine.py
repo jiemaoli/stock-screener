@@ -669,6 +669,7 @@ def score_buy_signal(
 
     return {
         'ticker': ticker,
+        'current_price': round(current_price, 2),
         'is_buy': is_buy,
         'score': round(final_score, 1),
         'phase': phase,
@@ -847,6 +848,7 @@ def score_sell_signal(
 
     return {
         'ticker': ticker,
+        'current_price': round(current_price, 2),
         'is_sell': is_sell,
         'score': round(final_score, 1),
         'severity': severity,

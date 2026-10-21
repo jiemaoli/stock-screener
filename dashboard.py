@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 import webbrowser
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -32,6 +33,7 @@ from src.config.scan_settings import (
     read_scan_settings,
     write_scan_settings,
 )
+from src.integrations.screener_api import completed_envelope, failed_envelope, running_envelope
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
 load_dotenv(PROJECT_ROOT / ".env")
@@ -50,6 +52,7 @@ VENV_PYTHON = PROJECT_ROOT / "venv" / "bin" / "python"
 SCAN_LOG_DIR = PROJECT_ROOT / "data" / "logs"
 SCAN_STATE_FILE = SCAN_LOG_DIR / "scan_job.json"
 SCAN_LOCK_FILE = PROJECT_ROOT / "data" / ".scan.lock"
+API_SCAN_DIR = PROJECT_ROOT / "data" / "api_scans"
 SCHEDULE_CONFIG_FILE = PROJECT_ROOT / "data" / "config" / "schedule.json"
 SCHEDULER_STATE_FILE = PROJECT_ROOT / "data" / "logs" / "scheduler_state.json"
 SCAN_COMMAND_ARGS = [
@@ -257,10 +260,14 @@ def _read_scan_state():
 
 
 def _write_scan_state(state):
-    SCAN_LOG_DIR.mkdir(parents=True, exist_ok=True)
-    temp_file = SCAN_STATE_FILE.with_suffix(".tmp")
+    _write_state_file(SCAN_STATE_FILE, state)
+
+
+def _write_state_file(path, state):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = path.with_suffix(".tmp")
     temp_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    temp_file.replace(SCAN_STATE_FILE)
+    temp_file.replace(path)
 
 
 def _process_is_running(process):
@@ -282,6 +289,61 @@ def _monitor_scan(process, state, log_file):
         _write_scan_state(final_state)
         if _scan_process is process:
             _scan_process = None
+
+
+def _monitor_api_scan(process, state, log_file, state_file, result_file):
+    global _scan_process
+    return_code = process.wait()
+    log_file.close()
+
+    with _scan_guard:
+        final_state = dict(state)
+        final_state["status"] = "completed" if return_code == 0 else "failed"
+        final_state["completed_at"] = datetime.now().astimezone().isoformat()
+        final_state["return_code"] = return_code
+        final_state["result_available"] = return_code == 0 and result_file.exists()
+        if return_code != 0:
+            final_state["error"] = "Screening process failed"
+        elif not result_file.exists():
+            final_state["status"] = "failed"
+            final_state["error"] = "Screening completed without a result file"
+        _write_state_file(state_file, final_state)
+        if _scan_process is process:
+            _scan_process = None
+
+
+def _internal_api_auth_error():
+    expected_token = os.getenv("SCREENER_API_TOKEN", "").strip()
+    if not expected_token:
+        return jsonify({"error": "Internal screening API is not configured"}), 503
+
+    authorization = request.headers.get("Authorization", "")
+    supplied_token = authorization[7:].strip() if authorization.startswith("Bearer ") else ""
+    if not supplied_token:
+        supplied_token = request.headers.get("X-API-Key", "").strip()
+    if not secrets.compare_digest(supplied_token, expected_token):
+        return jsonify({"error": "Unauthorized"}), 401
+    return None
+
+
+def _normalize_api_tickers(value):
+    if value is None:
+        return None
+    if not isinstance(value, list) or not value:
+        raise ValueError("tickers must be a non-empty JSON array")
+    if len(value) > 600:
+        raise ValueError("tickers supports at most 600 symbols per request")
+
+    tickers = []
+    seen = set()
+    for raw_ticker in value:
+        ticker = str(raw_ticker).strip().upper()
+        if not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,9}", ticker):
+            raise ValueError(f"Invalid ticker: {raw_ticker}")
+        if ticker not in seen:
+            seen.add(ticker)
+            tickers.append(ticker)
+    return tickers
 
 
 def parse_scan_file(filepath):
@@ -1261,6 +1323,12 @@ setInterval(refreshScanStatus, 5000);
 
 @app.before_request
 def require_login():
+    if (
+        request.path.startswith("/internal/")
+        or request.path.startswith("/api/v1/screen")
+        or request.path == "/api/v1/capabilities"
+    ):
+        return _internal_api_auth_error()
     if request.endpoint in {"login", "healthz"}:
         return None
     if session.get("authenticated"):
@@ -1464,6 +1532,170 @@ def api_scan_status():
         if _process_is_running(_scan_process):
             state["status"] = "running"
         return jsonify(state)
+
+
+@app.route("/internal/v1/screenings", methods=["POST"])
+@app.route("/api/v1/screen", methods=["POST"])
+def internal_create_screening():
+    global _scan_process
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+
+    standard_api = request.path == "/api/v1/screen"
+    parameters = body.get("parameters") if isinstance(body.get("parameters"), dict) else {}
+    if standard_api and str(body.get("strategy", "stage2_breakout")) != "stage2_breakout":
+        return jsonify({"error": "strategy must be stage2_breakout"}), 400
+    if standard_api and str(body.get("market", "US")).upper() != "US":
+        return jsonify({"error": "stock-screener currently supports market US only"}), 400
+
+    try:
+        tickers = _normalize_api_tickers(body.get("tickers", parameters.get("tickers")))
+        result_limit = int(
+            body.get("limit", body.get("result_limit", read_scan_settings()["result_limit"]))
+        )
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    if result_limit < 1 or result_limit > 100:
+        return jsonify({"error": "result_limit must be between 1 and 100"}), 400
+    universe = body.get("universe", parameters.get("universe"))
+    if tickers is None and universe != "configured":
+        return jsonify(
+            {"error": "Provide tickers or explicitly set universe to configured"}
+        ), 400
+
+    with _scan_guard:
+        if _process_is_running(_scan_process):
+            return jsonify({"error": "A scan is already running"}), 409
+
+        lock_check = subprocess.run(
+            ["/usr/bin/flock", "-n", str(SCAN_LOCK_FILE), "true"],
+            capture_output=True,
+        )
+        if lock_check.returncode != 0:
+            return jsonify({"error": "A scheduled or manual scan is already running"}), 409
+
+        job_id = uuid.uuid4().hex
+        job_dir = API_SCAN_DIR / job_id
+        job_dir.mkdir(parents=True, exist_ok=False)
+        state_file = job_dir / "state.json"
+        result_file = job_dir / "latest_api_scan.json"
+        log_path = job_dir / "scan.log"
+
+        python = str(VENV_PYTHON) if VENV_PYTHON.exists() else sys.executable
+        cmd = [
+            "/usr/bin/flock",
+            "-n",
+            str(SCAN_LOCK_FILE),
+            python,
+            *SCAN_COMMAND_ARGS,
+            "--api-job",
+            job_id,
+            "--no-telegram",
+            "--output-dir",
+            str(job_dir),
+            "--result-limit",
+            str(result_limit),
+        ]
+        if tickers is not None:
+            tickers_file = job_dir / "tickers.json"
+            tickers_file.write_text(
+                json.dumps(tickers, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            cmd.extend(["--tickers-file", str(tickers_file)])
+
+        log_file = log_path.open("w", encoding="utf-8")
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                cwd=str(PROJECT_ROOT),
+                start_new_session=True,
+            )
+        except Exception:
+            log_file.close()
+            raise
+
+        state = {
+            "job_id": job_id,
+            "status": "running",
+            "source": "fin_twt",
+            "notifications": False,
+            "pid": process.pid,
+            "started_at": datetime.now().astimezone().isoformat(),
+            "request": {
+                "universe": "custom" if tickers is not None else "configured",
+                "ticker_count": len(tickers) if tickers is not None else None,
+                "tickers": tickers,
+                "result_limit": result_limit,
+            },
+        }
+        _scan_process = process
+        _write_state_file(state_file, state)
+
+        monitor = threading.Thread(
+            target=_monitor_api_scan,
+            args=(process, state, log_file, state_file, result_file),
+            daemon=True,
+        )
+        monitor.start()
+
+    if standard_api:
+        return jsonify(running_envelope(job_id, state, f"/api/v1/screen/{job_id}")), 202
+    return jsonify({**state, "status_url": f"/internal/v1/screenings/{job_id}"}), 202
+
+
+@app.route("/internal/v1/screenings/<job_id>")
+@app.route("/api/v1/screen/<job_id>")
+def internal_get_screening(job_id):
+    if not re.fullmatch(r"[0-9a-f]{32}", job_id):
+        return jsonify({"error": "Invalid job ID"}), 400
+
+    job_dir = API_SCAN_DIR / job_id
+    state_file = job_dir / "state.json"
+    if not state_file.exists():
+        return jsonify({"error": "Screening job not found"}), 404
+
+    try:
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return jsonify({"error": "Could not read screening job state"}), 500
+
+    result_file = job_dir / "latest_api_scan.json"
+    if state.get("status") == "completed" and result_file.exists():
+        try:
+            result = json.loads(result_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return jsonify({"error": "Could not read screening result"}), 500
+
+        result_limit = int(state.get("request", {}).get("result_limit", 20))
+        result["buy_signals"] = result.get("buy_signals", [])[:result_limit]
+        result["sell_signals"] = result.get("sell_signals", [])[:result_limit]
+        if request.path.startswith("/api/v1/screen/"):
+            return jsonify(completed_envelope(job_id, state, result))
+        state["result"] = result
+
+    if request.path.startswith("/api/v1/screen/"):
+        if state.get("status") == "failed":
+            return jsonify(failed_envelope(job_id, state))
+        return jsonify(running_envelope(job_id, state, f"/api/v1/screen/{job_id}"))
+
+    return jsonify(state)
+
+
+@app.route("/api/v1/capabilities")
+def screener_capabilities():
+    return jsonify(
+        {
+            "schema_versions": ["1.0"],
+            "provider": "stock-screener",
+            "markets": ["US"],
+            "strategies": ["stage2_breakout"],
+            "execution": "async",
+        }
+    )
 
 
 def open_browser(port):

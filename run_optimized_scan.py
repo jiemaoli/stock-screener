@@ -19,6 +19,7 @@ Usage:
 import argparse
 import json
 import logging
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -72,6 +73,8 @@ def save_report(
     result_limit,
     is_test=False,
     output_dir="./data/daily_scans",
+    report_prefix=None,
+    latest_prefix=None,
 ):
     """Save comprehensive report."""
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -293,14 +296,15 @@ def save_report(
     report_text = "\n".join(output)
 
     # Save
-    report_prefix = "test_scan" if is_test else "optimized_scan"
+    report_prefix = report_prefix or ("test_scan" if is_test else "optimized_scan")
     filepath = Path(output_dir) / f"{report_prefix}_{timestamp}.txt"
     with open(filepath, 'w', encoding='utf-8') as f:
         f.write(report_text)
 
-    latest_path = Path(output_dir) / (
-        "latest_test_scan.txt" if is_test else "latest_optimized_scan.txt"
+    latest_prefix = latest_prefix or (
+        "latest_test_scan" if is_test else "latest_optimized_scan"
     )
+    latest_path = Path(output_dir) / f"{latest_prefix}.txt"
     with open(latest_path, 'w', encoding='utf-8') as f:
         f.write(report_text)
 
@@ -322,9 +326,7 @@ def save_report(
     audit_path = Path(output_dir) / f"{report_prefix}_{timestamp}.json"
     with audit_path.open("w", encoding="utf-8") as audit_file:
         json.dump(_json_safe(audit_payload), audit_file, ensure_ascii=False, indent=2, default=str)
-    latest_audit_path = Path(output_dir) / (
-        "latest_test_scan.json" if is_test else "latest_optimized_scan.json"
-    )
+    latest_audit_path = Path(output_dir) / f"{latest_prefix}.json"
     with latest_audit_path.open("w", encoding="utf-8") as audit_file:
         json.dump(_json_safe(audit_payload), audit_file, ensure_ascii=False, indent=2, default=str)
 
@@ -347,6 +349,11 @@ def main():
     parser.add_argument('--min-volume', type=int, default=100000, help='Min volume')
     parser.add_argument('--use-fmp', action='store_true', help='Use FMP for enhanced fundamentals on buy signals')
     parser.add_argument('--git-storage', action='store_true', help='Use Git-based storage for fundamentals (recommended)')
+    parser.add_argument('--tickers-file', help='JSON file containing a custom ticker list')
+    parser.add_argument('--output-dir', default='./data/daily_scans', help='Report output directory')
+    parser.add_argument('--result-limit', type=int, help='Override configured Top N result limit')
+    parser.add_argument('--api-job', help='API job identifier; writes an isolated API report')
+    parser.add_argument('--no-telegram', action='store_true', help='Never send Telegram notifications')
 
     args = parser.parse_args()
     scan_settings = read_scan_settings()
@@ -376,13 +383,28 @@ def main():
         universe_fetcher = USStockUniverseFetcher()
         logger.info("Fetching stock universe...")
         universe_mode = scan_settings["universe_mode"]
-        tickers = universe_fetcher.fetch_by_mode(universe_mode)
+        if args.tickers_file:
+            ticker_payload = json.loads(Path(args.tickers_file).read_text(encoding="utf-8"))
+            if not isinstance(ticker_payload, list):
+                raise ValueError("Custom ticker file must contain a JSON list")
+            tickers = []
+            seen = set()
+            for raw_ticker in ticker_payload:
+                ticker = str(raw_ticker).strip().upper()
+                if not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,9}", ticker):
+                    raise ValueError(f"Invalid ticker: {raw_ticker}")
+                if ticker not in seen:
+                    seen.add(ticker)
+                    tickers.append(ticker)
+            universe_label = f"API custom universe ({len(tickers)} tickers)"
+        else:
+            tickers = universe_fetcher.fetch_by_mode(universe_mode)
+            universe_label = UNIVERSE_MODES[universe_mode]
 
         if not tickers:
             logger.error("Failed to fetch universe")
             sys.exit(1)
 
-        universe_label = UNIVERSE_MODES[universe_mode]
         logger.info("Universe: %s (%d stocks)", universe_label, len(tickers))
 
         if args.test_mode:
@@ -492,6 +514,10 @@ def main():
         )
 
         # Report
+        result_limit = args.result_limit or scan_settings["result_limit"]
+        if result_limit < 1 or result_limit > 100:
+            raise ValueError("Result limit must be between 1 and 100")
+
         report_path = save_report(
             results,
             buy_signals,
@@ -499,19 +525,25 @@ def main():
             spy_analysis,
             breadth,
             universe_label=universe_label,
-            result_limit=scan_settings["result_limit"],
+            result_limit=result_limit,
             is_test=args.test_mode,
+            output_dir=args.output_dir,
+            report_prefix="api_scan" if args.api_job else None,
+            latest_prefix="latest_api_scan" if args.api_job else None,
         )
 
-        TelegramNotifier().send_scan_summary(
-            buy_signals=buy_signals,
-            sell_signals=sell_signals,
-            spy_analysis=spy_analysis,
-            breadth=breadth,
-            report_path=report_path,
-            is_test=args.test_mode,
-            result_limit=scan_settings["result_limit"],
-        )
+        if args.no_telegram:
+            logger.info("Telegram notification disabled for this scan")
+        else:
+            TelegramNotifier().send_scan_summary(
+                buy_signals=buy_signals,
+                sell_signals=sell_signals,
+                spy_analysis=spy_analysis,
+                breadth=breadth,
+                report_path=report_path,
+                is_test=args.test_mode,
+                result_limit=result_limit,
+            )
 
         # Show FMP usage if enabled
         if args.use_fmp:
