@@ -30,6 +30,85 @@ VENV_PYTHON = PROJECT_ROOT / "venv" / "bin" / "python"
 SCAN_LOG_DIR = PROJECT_ROOT / "data" / "logs"
 SCAN_STATE_FILE = SCAN_LOG_DIR / "scan_job.json"
 SCAN_LOCK_FILE = PROJECT_ROOT / "data" / ".scan.lock"
+SCAN_COMMAND_ARGS = [
+    "run_optimized_scan.py",
+    "--conservative",
+    "--git-storage",
+    "--clear-progress",
+]
+
+SYSTEM_INFO = {
+    "schedule": {
+        "cron": "15 18 * * 1-5",
+        "timezone": "America/New_York",
+        "description": "每周一至周五，美东时间 18:15（美股收盘后）",
+        "beijing_time": "夏令时次日 06:15；冬令时次日 07:15",
+        "command": "python run_optimized_scan.py --conservative --git-storage --clear-progress",
+        "overlap_protection": "/app/data/.scan.lock（手动与定时任务共用）",
+    },
+    "runtime": {
+        "universe_size": "约 3,700–3,800 只美股",
+        "test_size": 100,
+        "full_scan_time": "通常 60–90 分钟，数据源限流或重试时可能更久",
+        "workers": 2,
+        "request_delay": "全局价格请求之间至少间隔 1.0 秒",
+        "price_refresh": "每次重新获取每只股票 5 年日线；最近约 252 个交易日用于技术分析",
+        "fundamental_cache": "财报季缓存 7 天，非财报季缓存 90 天",
+        "telegram": "全量和定时扫描完成后通知；测试扫描默认不通知",
+    },
+    "filters": [
+        {"name": "上市标的", "value": "NASDAQ / NYSE / AMEX 普通股", "meaning": "排除 ETF、基金、债券、权证、优先股和特殊代码"},
+        {"name": "历史数据", "value": "至少 200 个交易日", "meaning": "确保均线和阶段判断有足够样本"},
+        {"name": "股价", "value": "$5–$10,000", "meaning": "排除低价股和明显异常价格"},
+        {"name": "流动性", "value": "20 日平均成交量 ≥ 100,000", "meaning": "排除成交过于稀疏的股票"},
+        {"name": "严重回撤", "value": "5 年最大回撤不得超过 90%", "meaning": "排除历史结构严重破坏的标的"},
+    ],
+    "market_gate": [
+        "SPY 必须处于 Phase 1（筑底）或 Phase 2（上升趋势）",
+        "全市场 Phase 2 股票占比必须达到 15%",
+        "市场门槛只控制买入信号；卖出信号在任何市场环境下都会检查",
+    ],
+    "phases": [
+        {"phase": 1, "name": "筑底/盘整", "meaning": "均线趋平，价格形成底部；尚不是正式买点"},
+        {"phase": 2, "name": "上升趋势", "meaning": "价格和均线多头排列；买入候选必须处于本阶段"},
+        {"phase": 3, "name": "派发/见顶", "meaning": "趋势趋平或转弱，关注减仓和卖出风险"},
+        {"phase": 4, "name": "下降趋势", "meaning": "价格和均线走弱，应回避或考虑退出"},
+    ],
+    "minervini": [
+        "股价高于 150 日和 200 日均线",
+        "150 日均线高于 200 日均线",
+        "200 日均线最近至少一个月向上",
+        "50 日均线高于 150 日均线，且 150 日高于 200 日",
+        "股价高于 50 日均线",
+        "股价至少比 52 周低点高 30%",
+        "股价距离 52 周高点不超过 25%",
+        "确认处于 Phase 2 上升阶段",
+    ],
+    "buy_scores": [
+        {"name": "趋势结构", "points": 40, "meaning": "均线排列与斜率、突破质量、距离均线是否过度延伸"},
+        {"name": "基本面", "points": 40, "meaning": "营收增长、EPS 增长、库存变化及当前预留的利润率分值"},
+        {"name": "风险收益比", "points": 15, "meaning": "以建议止损和 30% 上行目标估算；2:1 以下不得分"},
+        {"name": "相对强度 RS", "points": 10, "meaning": "股票相对 SPY 的表现斜率，正值表示跑赢市场"},
+        {"name": "成交量", "points": 10, "meaning": "最近上涨日与下跌日的平均成交量对比"},
+        {"name": "入场质量", "points": 5, "meaning": "距离 52 周高点、50 日均线和理想突破区域的位置"},
+        {"name": "VCP 加分", "points": 5, "meaning": "波动率收缩形态的次数、质量和突破量能"},
+    ],
+    "thresholds": {
+        "buy": "Phase 2 + Minervini 至少通过 7/8 + 总分 ≥ 60（满分 125）",
+        "sell": "Phase 3/4 + 总分 ≥ 60（60 中等、70 高、80 严重）",
+        "note": "生产全市场扫描的真实买入阈值是 60；config.yaml 中的 70 属于旧版流程，不控制本页面的扫描。",
+    },
+    "terms": [
+        {"name": "SMA 50/150/200", "meaning": "50、150、200 个交易日的简单移动平均线，用于判断短中长期趋势结构"},
+        {"name": "Slope", "meaning": "均线近期变化斜率；正值代表均线向上，负值代表均线向下"},
+        {"name": "RS", "meaning": "Relative Strength，相对 SPY 的强弱趋势；不是 RSI 超买超卖指标"},
+        {"name": "R:R", "meaning": "Reward/Risk，预期收益与止损风险之比；例如 3:1 表示潜在收益约为风险的 3 倍"},
+        {"name": "VCP", "meaning": "Volatility Contraction Pattern，波动率收缩形态，观察振幅和成交量逐步收敛"},
+        {"name": "Market Breadth", "meaning": "市场宽度，即处于各阶段股票的比例；Phase 2 占比反映上涨参与度"},
+        {"name": "Entry Quality", "meaning": "入场位置质量：良好、偏离或较差；用于提示是否追高，不等同于独立买入信号"},
+        {"name": "Stop Loss", "meaning": "根据均线、近期低点和最大风险计算的参考止损位，需结合个人仓位管理"},
+    ],
+}
 
 _scan_process = None
 _scan_guard = threading.Lock()
@@ -245,11 +324,11 @@ def get_scan_files():
 
 DASHBOARD_HTML = """
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Stock Screener Dashboard</title>
+<title>美股选股系统</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
   :root {
@@ -270,7 +349,7 @@ DASHBOARD_HTML = """
   .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; }
   .header h1 { font-size: 20px; font-weight: 600; }
   .header .meta { color: var(--muted); font-size: 13px; }
-  .header .actions { display: flex; gap: 10px; }
+  .header .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
   .btn { padding: 8px 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 13px; transition: all 0.15s; }
   .btn:hover { border-color: var(--blue); }
@@ -337,27 +416,43 @@ DASHBOARD_HTML = """
 
   .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px; font-size: 13px; box-shadow: 0 4px 20px rgba(0,0,0,0.4); z-index: 100; transition: opacity 0.3s; }
   .scan-status { color: var(--muted); font-size: 12px; align-self: center; white-space: nowrap; }
+  .section-title { font-size: 18px; margin: 30px 0 14px; }
+  .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .info-list { padding-left: 20px; color: var(--muted); font-size: 13px; line-height: 1.75; }
+  .info-list strong { color: var(--text); }
+  .param-table { width: 100%; border-collapse: collapse; }
+  .param-table th, .param-table td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); font-size: 12px; vertical-align: top; }
+  .param-table th { color: var(--muted); }
+  .code-block { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 10px 12px; color: #cbd5e1; font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; margin-top: 8px; }
+  details.rule-group { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; }
+  details.rule-group summary { cursor: pointer; padding: 16px 20px; font-size: 14px; font-weight: 600; }
+  details.rule-group .detail-content { padding: 0 20px 20px; }
+  .notice { padding: 12px 14px; border-left: 3px solid var(--yellow); background: rgba(234,179,8,.08); color: var(--muted); border-radius: 4px; font-size: 12px; line-height: 1.7; }
+  @media (max-width: 760px) {
+    .header { padding: 14px 16px; align-items: flex-start; gap: 12px; flex-direction: column; }
+    .container { padding: 16px; }
+  }
 </style>
 </head>
 <body>
 
 <div class="header">
   <div>
-    <h1>Stock Screener</h1>
-    <div class="meta" id="headerMeta">Loading...</div>
+    <h1>美股选股系统</h1>
+    <div class="meta" id="headerMeta">正在加载...</div>
   </div>
   <div class="actions">
-    <span class="scan-status" id="scanStatus">Idle</span>
+    <span class="scan-status" id="scanStatus">空闲</span>
     <select class="scan-select" id="scanSelect" onchange="loadScan(this.value)"></select>
-    <button class="btn" onclick="runScan(false)" id="testBtn">Test Scan (100)</button>
-    <button class="btn primary" onclick="runScan(true)" id="fullBtn">Full Scan</button>
+    <button class="btn" onclick="runScan(false)" id="testBtn">测试扫描（100只）</button>
+    <button class="btn primary" onclick="runScan(true)" id="fullBtn">全量扫描</button>
   </div>
 </div>
 
 <div class="container" id="content">
   <div class="no-data" id="noData" style="display:none">
-    <h2>No scan data yet</h2>
-    <p>Run a test scan to get started</p>
+    <h2>暂无扫描数据</h2>
+    <p>请先运行一次测试扫描</p>
   </div>
   <div id="dashboard" style="display:none">
 
@@ -365,29 +460,29 @@ DASHBOARD_HTML = """
 
     <div class="grid-2">
       <div class="card">
-        <h2>Market Breadth</h2>
+        <h2>市场宽度</h2>
         <div class="chart-wrap"><canvas id="breadthChart"></canvas></div>
       </div>
       <div class="card">
-        <h2>SPY Regime</h2>
+        <h2>SPY 市场环境</h2>
         <div id="spyInfo"></div>
       </div>
     </div>
 
     <div class="card" style="margin-bottom:16px">
-      <h2 style="color:var(--green)">Buy Signals</h2>
+      <h2 style="color:var(--green)">买入信号</h2>
       <div style="overflow-x:auto">
         <table class="signal-table" id="buyTable">
           <thead>
             <tr>
               <th>#</th>
-              <th>Ticker</th>
-              <th>Score</th>
-              <th>Entry</th>
-              <th>Stop Loss</th>
-              <th>R:R</th>
-              <th>RS</th>
-              <th>Key Reasons</th>
+              <th>代码</th>
+              <th>评分</th>
+              <th>入场质量</th>
+              <th>参考止损</th>
+              <th>收益风险比</th>
+              <th>相对强度</th>
+              <th>主要理由</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -396,17 +491,17 @@ DASHBOARD_HTML = """
     </div>
 
     <div class="card">
-      <h2 style="color:var(--red)">Sell Signals</h2>
+      <h2 style="color:var(--red)">卖出信号</h2>
       <div style="overflow-x:auto">
         <table class="signal-table" id="sellTable">
           <thead>
             <tr>
               <th>#</th>
-              <th>Ticker</th>
-              <th>Score</th>
-              <th>Severity</th>
-              <th>Breakdown</th>
-              <th>Reasons</th>
+              <th>代码</th>
+              <th>评分</th>
+              <th>严重程度</th>
+              <th>跌破位置</th>
+              <th>主要理由</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -414,12 +509,124 @@ DASHBOARD_HTML = """
       </div>
     </div>
 
+    <h2 class="section-title">系统运行机制与选股规则</h2>
+    <div id="systemInfo"><div class="card">正在加载系统配置...</div></div>
+
   </div>
 </div>
 
 <script>
 let breadthChartInstance = null;
 let previousScanStatus = null;
+let systemInfoData = null;
+
+const phaseNames = {1: 'Phase 1（筑底/盘整）', 2: 'Phase 2（上升趋势）', 3: 'Phase 3（派发/见顶）', 4: 'Phase 4（下降趋势）'};
+const trendNames = {Bullish: '上涨', Bearish: '下跌', Consolidating: '盘整', Topping: '见顶', Unknown: '未知'};
+const entryNames = {Good: '良好', Extended: '偏离', Poor: '较差'};
+const severityNames = {critical: '严重', high: '高', medium: '中等', low: '低'};
+
+function regimeName(value) {
+  if ((value || '').includes('RISK-ON (Strong)')) return '风险偏好（强）';
+  if ((value || '').includes('RISK-ON (Moderate)')) return '风险偏好（中等）';
+  if ((value || '').includes('RISK-ON')) return '风险偏好（偏弱/混合）';
+  if ((value || '').includes('RISK-OFF')) return '风险规避';
+  return '过渡/不确定';
+}
+
+function translateReason(text) {
+  let value = cleanEmoji(text);
+  const replacements = [
+    [/Strong Stage 2/g, '强势第二阶段'], [/Good Stage 2/g, '良好第二阶段'], [/Weak Stage 2/g, '偏弱第二阶段'],
+    [/Very weak Stage 2/g, '很弱的第二阶段'], [/SMAs rising strongly/g, '均线强势向上'], [/SMAs rising moderately/g, '均线温和向上'],
+    [/SMAs rising weakly/g, '均线微弱向上'], [/SMAs flat or declining/g, '均线走平或下降'], [/Over-extended/g, '过度偏离均线'],
+    [/Moderately extended above 50 SMA/g, '相对 50 日均线偏离较大'], [/Revenue/g, '营收'], [/EPS/g, '每股收益'],
+    [/Inventory drawing/g, '库存下降'], [/Inventory neutral/g, '库存稳定'], [/Inventory building rapidly/g, '库存快速增加'],
+    [/Inventory building/g, '库存增加'], [/Volume heavier on up days/g, '上涨日成交量更大'], [/Volume slightly heavier on up days/g, '上涨日成交量略大'],
+    [/Volume pattern neutral/g, '成交量结构中性'], [/Volume heavier on down days/g, '下跌日成交量更大'], [/Strong RS/g, '相对强度强'],
+    [/Positive RS/g, '相对强度为正'], [/Neutral RS/g, '相对强度中性'], [/Weak RS rollover/g, '相对强度转弱'], [/Weak RS/g, '相对强度弱'],
+    [/Declining RS/g, '相对强度下降'], [/Outstanding R\\/R/g, '收益风险比极佳'], [/Excellent R\\/R/g, '收益风险比优秀'],
+    [/Good R\\/R/g, '收益风险比良好'], [/Acceptable R\\/R/g, '收益风险比可接受'], [/Poor R\\/R/g, '收益风险比较差'],
+    [/Good entry zone/g, '处于良好入场区域'], [/Approaching entry zone/g, '接近理想入场区域'], [/Outside ideal entry zone/g, '不在理想入场区域'],
+    [/In Phase 3 \\(Distribution\\)/g, '处于 Phase 3（派发/见顶）'], [/In Phase 4 \\(Downtrend\\)/g, '处于 Phase 4（下降趋势）'],
+    [/Broke below 50 SMA by/g, '跌破 50 日均线'], [/50 SMA declining/g, '50 日均线下降'], [/High volume breakdown/g, '放量跌破'],
+    [/Elevated volume/g, '成交量放大'], [/Moderate volume/g, '成交量中等'], [/Low volume breakdown/g, '缩量跌破'],
+    [/RS still positive/g, '相对强度仍为正'], [/No fundamental data available/g, '没有可用基本面数据'],
+    [/outperforming SPY/g, '跑赢 SPY'], [/underperforming SPY/g, '跑输 SPY'], [/volume confirmed/g, '成交量确认'], [/low volume/g, '成交量不足']
+  ];
+  replacements.forEach(([pattern, replacement]) => { value = value.replace(pattern, replacement); });
+  return value;
+}
+
+async function loadSystemInfo() {
+  const res = await fetch('api/system-info');
+  systemInfoData = await res.json();
+  renderSystemInfo(systemInfoData);
+}
+
+function rows(items, points = false) {
+  return items.map(item => `<tr><td><strong>${item.name}</strong></td>${points ? `<td>${item.points}</td>` : `<td>${item.value || '-'}</td>`}<td>${item.meaning}</td></tr>`).join('');
+}
+
+function renderSystemInfo(info) {
+  const schedule = info.schedule;
+  const runtime = info.runtime;
+  document.getElementById('systemInfo').innerHTML = `
+    <div class="info-grid" style="margin-bottom:16px">
+      <div class="card">
+        <h2>定时任务</h2>
+        <ul class="info-list">
+          <li><strong>执行时间：</strong>${schedule.description}</li>
+          <li><strong>北京时间：</strong>${schedule.beijing_time}</li>
+          <li><strong>Cron：</strong><code>${schedule.cron}</code></li>
+          <li><strong>时区：</strong>${schedule.timezone}</li>
+          <li><strong>防重复：</strong>${schedule.overlap_protection}</li>
+        </ul>
+        <div class="code-block">${schedule.command}</div>
+      </div>
+      <div class="card">
+        <h2>扫描运行方式</h2>
+        <ul class="info-list">
+          <li><strong>股票池：</strong>${runtime.universe_size}</li>
+          <li><strong>测试扫描：</strong>${runtime.test_size} 只</li>
+          <li><strong>全量耗时：</strong>${runtime.full_scan_time}</li>
+          <li><strong>并发：</strong>${runtime.workers} 个工作线程，但价格请求受全局限速控制</li>
+          <li><strong>请求节奏：</strong>${runtime.request_delay}</li>
+          <li><strong>价格数据：</strong>${runtime.price_refresh}</li>
+          <li><strong>基本面缓存：</strong>${runtime.fundamental_cache}</li>
+          <li><strong>Telegram：</strong>${runtime.telegram}</li>
+        </ul>
+      </div>
+    </div>
+    <div class="notice" style="margin-bottom:16px"><strong>为什么每天全量扫描都很慢：</strong>目前不是只补当天行情，而是每次逐只重新下载 5 年价格历史并执行回撤检查。基本面缓存不会消除这些价格请求，所以每天通常仍需 60–90 分钟。要明显提速，需要改成批量下载或价格历史增量更新。</div>
+    <details class="rule-group" open>
+      <summary>股票池初筛与市场环境门槛</summary>
+      <div class="detail-content">
+        <table class="param-table"><thead><tr><th>项目</th><th>当前参数</th><th>意义</th></tr></thead><tbody>${rows(info.filters)}</tbody></table>
+        <h3 style="font-size:13px;margin:18px 0 8px">买入信号的市场开关</h3>
+        <ol class="info-list">${info.market_gate.map(x => `<li>${x}</li>`).join('')}</ol>
+      </div>
+    </details>
+    <details class="rule-group">
+      <summary>Phase 四阶段定义</summary>
+      <div class="detail-content"><table class="param-table"><thead><tr><th>阶段</th><th>名称</th><th>意义</th></tr></thead><tbody>${info.phases.map(x => `<tr><td>Phase ${x.phase}</td><td>${x.name}</td><td>${x.meaning}</td></tr>`).join('')}</tbody></table></div>
+    </details>
+    <details class="rule-group">
+      <summary>Minervini 趋势模板（必须至少通过 7/8）</summary>
+      <div class="detail-content"><ol class="info-list">${info.minervini.map(x => `<li>${x}</li>`).join('')}</ol></div>
+    </details>
+    <details class="rule-group" open>
+      <summary>买入评分组成和真实阈值</summary>
+      <div class="detail-content">
+        <table class="param-table"><thead><tr><th>评分项</th><th>最高分</th><th>参数意义</th></tr></thead><tbody>${rows(info.buy_scores, true)}</tbody></table>
+        <div class="notice" style="margin-top:14px"><strong>买入条件：</strong>${info.thresholds.buy}<br><strong>卖出条件：</strong>${info.thresholds.sell}<br>${info.thresholds.note}</div>
+      </div>
+    </details>
+    <details class="rule-group">
+      <summary>技术参数词典</summary>
+      <div class="detail-content"><table class="param-table"><thead><tr><th>参数</th><th>含义</th></tr></thead><tbody>${info.terms.map(x => `<tr><td><strong>${x.name}</strong></td><td>${x.meaning}</td></tr>`).join('')}</tbody></table></div>
+    </details>
+  `;
+}
 
 async function loadScanList() {
   const res = await fetch('api/scans');
@@ -427,7 +634,7 @@ async function loadScanList() {
   const sel = document.getElementById('scanSelect');
   sel.innerHTML = '';
   if (scans.length === 0) {
-    sel.innerHTML = '<option>No scans</option>';
+    sel.innerHTML = '<option>暂无扫描记录</option>';
     document.getElementById('noData').style.display = '';
     document.getElementById('dashboard').style.display = 'none';
     return;
@@ -456,7 +663,7 @@ function renderDashboard(d) {
   document.getElementById('noData').style.display = 'none';
   document.getElementById('dashboard').style.display = '';
   document.getElementById('headerMeta').textContent =
-    `Scan: ${d.scan_date} | ${d.stats.analyzed || '?'} stocks analyzed | ${d.regime}`;
+    `扫描日期：${d.scan_date}｜已分析 ${(d.stats.analyzed || 0).toLocaleString()} 只｜${regimeName(d.regime)}`;
 
   // Stats cards
   const buyCount = d.stats.buy_count || d.buy_signals.length;
@@ -465,29 +672,29 @@ function renderDashboard(d) {
 
   document.getElementById('statsRow').innerHTML = `
     <div class="stat-card green">
-      <div class="label">Buy Signals</div>
+      <div class="label">买入信号</div>
       <div class="value">${buyCount}</div>
-      <div class="sub">Phase 2 confirmed uptrends</div>
+      <div class="sub">确认处于 Phase 2 的上升趋势</div>
     </div>
     <div class="stat-card red">
-      <div class="label">Sell Signals</div>
+      <div class="label">卖出信号</div>
       <div class="value">${sellCount}</div>
-      <div class="sub">Phase 3/4 breakdowns</div>
+      <div class="sub">Phase 3/4 转弱或跌破</div>
     </div>
     <div class="stat-card blue">
-      <div class="label">Top Score</div>
+      <div class="label">最高买入评分</div>
       <div class="value">${topScore}<span style="font-size:14px;color:var(--muted)">/125</span></div>
       <div class="sub">${d.buy_signals.length > 0 ? d.buy_signals[0].ticker : '-'}</div>
     </div>
     <div class="stat-card">
-      <div class="label">Universe</div>
+      <div class="label">本次分析</div>
       <div class="value">${(d.stats.analyzed || 0).toLocaleString()}</div>
-      <div class="sub">of ${(d.stats.total_universe || 0).toLocaleString()} | ${d.stats.processing_minutes || '?'} min</div>
+      <div class="sub">股票池 ${(d.stats.total_universe || 0).toLocaleString()} 只｜耗时 ${d.stats.processing_minutes || '?'} 分钟</div>
     </div>
     <div class="stat-card ${d.spy && d.spy.phase === 2 ? 'green' : d.spy && d.spy.phase === 4 ? 'red' : 'yellow'}">
-      <div class="label">SPY Phase</div>
+      <div class="label">SPY 阶段</div>
       <div class="value">${d.spy.phase || '?'}</div>
-      <div class="sub">${d.spy.trend || ''} @ $${(d.spy.price || 0).toFixed(2)}</div>
+      <div class="sub">${trendNames[d.spy.trend] || d.spy.trend || ''}｜$${(d.spy.price || 0).toFixed(2)}</div>
     </div>
   `;
 
@@ -498,7 +705,7 @@ function renderDashboard(d) {
   breadthChartInstance = new Chart(ctx, {
     type: 'doughnut',
     data: {
-      labels: ['Phase 1 (Base)', 'Phase 2 (Uptrend)', 'Phase 3 (Distribution)', 'Phase 4 (Downtrend)'],
+      labels: ['Phase 1（筑底）', 'Phase 2（上升）', 'Phase 3（派发）', 'Phase 4（下降）'],
       datasets: [{
         data: [b.phase_1_pct || 0, b.phase_2_pct || 0, b.phase_3_pct || 0, b.phase_4_pct || 0],
         backgroundColor: ['#eab308', '#22c55e', '#f97316', '#ef4444'],
@@ -511,7 +718,7 @@ function renderDashboard(d) {
       maintainAspectRatio: false,
       plugins: {
         legend: { position: 'right', labels: { color: '#8b8fa3', font: { size: 11 }, padding: 12 } },
-        tooltip: { callbacks: { label: (c) => `${c.label}: ${c.parsed}% (${b[`phase_${c.dataIndex+1}_count`] || 0} stocks)` } }
+        tooltip: { callbacks: { label: (c) => `${c.label}：${c.parsed}%（${b[`phase_${c.dataIndex+1}_count`] || 0} 只）` } }
       }
     }
   });
@@ -520,48 +727,48 @@ function renderDashboard(d) {
   const regimeClass = d.regime.includes('RISK-ON') ? 'risk-on' : d.regime.includes('RISK-OFF') ? 'risk-off' : 'transitional';
   document.getElementById('spyInfo').innerHTML = `
     <div style="margin-bottom:16px">
-      <span class="regime-badge ${regimeClass}">${d.regime}</span>
+      <span class="regime-badge ${regimeClass}">${regimeName(d.regime)}</span>
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
       <div>
-        <div style="color:var(--muted);font-size:11px;margin-bottom:2px">Phase</div>
-        <div style="font-size:20px;font-weight:700">${d.spy.phase} - ${d.spy.phase_name || ''}</div>
+        <div style="color:var(--muted);font-size:11px;margin-bottom:2px">阶段</div>
+        <div style="font-size:20px;font-weight:700">${phaseNames[d.spy.phase] || '?'}</div>
       </div>
       <div>
-        <div style="color:var(--muted);font-size:11px;margin-bottom:2px">Confidence</div>
+        <div style="color:var(--muted);font-size:11px;margin-bottom:2px">判断置信度</div>
         <div style="font-size:20px;font-weight:700">${d.spy.confidence || '?'}%</div>
       </div>
       <div>
-        <div style="color:var(--muted);font-size:11px;margin-bottom:2px">Price</div>
+        <div style="color:var(--muted);font-size:11px;margin-bottom:2px">SPY 价格</div>
         <div style="font-size:20px;font-weight:700">$${(d.spy.price || 0).toFixed(2)}</div>
       </div>
       <div>
-        <div style="color:var(--muted);font-size:11px;margin-bottom:2px">Trend</div>
-        <div style="font-size:20px;font-weight:700;color:${d.spy.trend === 'Bullish' ? 'var(--green)' : d.spy.trend === 'Bearish' ? 'var(--red)' : 'var(--yellow)'}">${d.spy.trend || '?'}</div>
+        <div style="color:var(--muted);font-size:11px;margin-bottom:2px">趋势</div>
+        <div style="font-size:20px;font-weight:700;color:${d.spy.trend === 'Bullish' ? 'var(--green)' : d.spy.trend === 'Bearish' ? 'var(--red)' : 'var(--yellow)'}">${trendNames[d.spy.trend] || d.spy.trend || '?'}</div>
       </div>
     </div>
     <div style="margin-top:20px;padding:12px;background:var(--bg);border-radius:8px;font-size:12px;color:var(--muted)">
       ${d.regime.includes('RISK-ON')
-        ? 'Favorable environment for breakout trades. Focus on Phase 2 breakouts with strong RS.'
+        ? '市场环境允许寻找突破机会，重点关注 Phase 2 且相对强度较高的股票。'
         : d.regime.includes('RISK-OFF')
-        ? 'Defensive environment — raise cash, tighten stops. Avoid new breakouts.'
-        : 'Mixed/transitional market — be selective. Focus on highest quality setups only.'}
+        ? '当前偏防御，应控制仓位、收紧止损，并谨慎对待新的突破信号。'
+        : '市场处于混合或过渡阶段，应提高筛选标准，只关注质量最高的候选。'}
     </div>
   `;
 
   // Buy signals table
   const buyBody = document.querySelector('#buyTable tbody');
   if (d.buy_signals.length === 0) {
-    buyBody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px">No buy signals</td></tr>';
+    buyBody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px">本次没有满足条件的买入信号</td></tr>';
   } else {
     buyBody.innerHTML = d.buy_signals.map(s => {
       const pct = (s.score / (s.max_score || 125)) * 100;
       const barColor = pct >= 80 ? 'var(--green)' : pct >= 60 ? 'var(--blue)' : 'var(--yellow)';
       const entryClass = (s.entry_quality || '').toLowerCase();
-      const topReasons = (s.reasons || []).slice(0, 3).map(r => `<li>${cleanEmoji(r)}</li>`).join('');
+      const topReasons = (s.reasons || []).slice(0, 3).map(r => `<li>${translateReason(r)}</li>`).join('');
       const extraReasons = (s.reasons || []).slice(3);
       const extraHTML = extraReasons.length > 0
-        ? `<div class="extra-reasons" style="display:none">${extraReasons.map(r => `<li>${cleanEmoji(r)}</li>`).join('')}</div><button class="expand-btn" onclick="toggleReasons(this)">+${extraReasons.length} more</button>`
+        ? `<div class="extra-reasons" style="display:none">${extraReasons.map(r => `<li>${translateReason(r)}</li>`).join('')}</div><button class="expand-btn" data-count="${extraReasons.length}" onclick="toggleReasons(this)">展开其余 ${extraReasons.length} 条</button>`
         : '';
 
       return `<tr>
@@ -571,7 +778,7 @@ function renderDashboard(d) {
           <span class="score-num">${s.score}</span>
           <div class="score-bar"><div class="fill" style="width:${pct}%;background:${barColor}"></div></div>
         </td>
-        <td><span class="badge ${entryClass}">${s.entry_quality || '-'}</span></td>
+        <td><span class="badge ${entryClass}">${entryNames[s.entry_quality] || s.entry_quality || '-'}</span></td>
         <td>${s.stop_loss ? '$' + s.stop_loss.toFixed(2) : '-'}</td>
         <td style="color:${(s.rr_ratio||0) >= 3 ? 'var(--green)' : (s.rr_ratio||0) >= 2 ? 'var(--text)' : 'var(--yellow)'}">${s.rr_ratio ? s.rr_ratio.toFixed(1) + ':1' : '-'}</td>
         <td style="color:${(s.rs||0) > 0.1 ? 'var(--green)' : (s.rs||0) > 0 ? 'var(--text)' : 'var(--red)'}">${s.rs != null ? s.rs.toFixed(3) : '-'}</td>
@@ -583,16 +790,16 @@ function renderDashboard(d) {
   // Sell signals table
   const sellBody = document.querySelector('#sellTable tbody');
   if (d.sell_signals.length === 0) {
-    sellBody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:30px">No sell signals</td></tr>';
+    sellBody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:30px">本次没有满足条件的卖出信号</td></tr>';
   } else {
     sellBody.innerHTML = d.sell_signals.map(s => {
       const sevClass = (s.severity || 'medium').toLowerCase();
-      const reasons = (s.reasons || []).map(r => `<li>${cleanEmoji(r)}</li>`).join('');
+      const reasons = (s.reasons || []).map(r => `<li>${translateReason(r)}</li>`).join('');
       return `<tr>
         <td>${s.rank}</td>
         <td><span class="ticker">${s.ticker}</span></td>
         <td><span class="score-num">${s.score}</span></td>
-        <td><span class="badge ${sevClass}">${(s.severity || '?').toUpperCase()}</span></td>
+        <td><span class="badge ${sevClass}">${severityNames[sevClass] || s.severity || '?'}</span></td>
         <td>${s.breakdown_level ? '$' + s.breakdown_level.toFixed(2) : '-'}</td>
         <td><ul class="reasons-list">${reasons}</ul></td>
       </tr>`;
@@ -608,22 +815,22 @@ function toggleReasons(btn) {
   const extra = btn.previousElementSibling;
   if (extra.style.display === 'none') {
     extra.style.display = '';
-    btn.textContent = 'less';
+    btn.textContent = '收起';
   } else {
     extra.style.display = 'none';
-    btn.textContent = btn.textContent;
+    btn.textContent = `展开其余 ${btn.dataset.count} 条`;
   }
 }
 
 async function runScan(full) {
   const confirmation = full
-    ? 'Confirm Full Scan? This scans the complete US stock universe and usually takes 60-90+ minutes.'
-    : 'Confirm Test Scan? This scans 100 stocks and usually takes about 2 minutes.';
+    ? '确认开始全量扫描吗？将扫描约 3,700–3,800 只美股，通常需要 60–90 分钟，期间不能启动其他扫描。'
+    : '确认开始测试扫描吗？将扫描股票池前 100 只，通常需要约 2 分钟，测试结果默认不推送 Telegram。';
   if (!window.confirm(confirmation)) return;
 
   const btn = full ? document.getElementById('fullBtn') : document.getElementById('testBtn');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>Starting...';
+  btn.innerHTML = '<span class="spinner"></span>正在启动...';
 
   try {
     const res = await fetch('api/run-scan', {
@@ -633,15 +840,15 @@ async function runScan(full) {
     });
     const result = await res.json();
     if (res.ok && result.success) {
-      showToast(full ? 'Full scan started in the background.' : 'Test scan started in the background.');
+      showToast(full ? '全量扫描已在后台启动。' : '测试扫描已在后台启动。');
       previousScanStatus = 'running';
       await refreshScanStatus();
     } else {
-      showToast('Could not start scan: ' + (result.error || 'unknown error'));
+      showToast('无法启动扫描：' + translateError(result.error));
       await refreshScanStatus();
     }
   } catch (e) {
-    showToast('Error: ' + e.message);
+    showToast('请求出错：' + e.message);
     setScanButtons(false);
   }
 }
@@ -651,8 +858,17 @@ function setScanButtons(running, full = false) {
   const fullBtn = document.getElementById('fullBtn');
   testBtn.disabled = running;
   fullBtn.disabled = running;
-  testBtn.textContent = running && !full ? 'Test Scanning...' : 'Test Scan (100)';
-  fullBtn.textContent = running && full ? 'Full Scanning...' : 'Full Scan';
+  testBtn.textContent = running && !full ? '测试扫描中...' : '测试扫描（100只）';
+  fullBtn.textContent = running && full ? '全量扫描中...' : '全量扫描';
+}
+
+function translateError(error) {
+  const mapping = {
+    'A scan is already running': '已有扫描正在运行',
+    'A scheduled or manual scan is already running': '定时或手动扫描正在运行',
+    'unknown error': '未知错误'
+  };
+  return mapping[error] || error || '未知错误';
 }
 
 async function refreshScanStatus() {
@@ -663,25 +879,25 @@ async function refreshScanStatus() {
 
     if (state.status === 'running') {
       setScanButtons(true, state.full === true);
-      const kind = state.full ? 'Full scan' : 'Test scan';
-      statusEl.innerHTML = '<span class="spinner"></span>' + kind + ' running';
+      const kind = state.full ? '全量扫描' : '测试扫描';
+      statusEl.innerHTML = '<span class="spinner"></span>' + kind + '运行中';
     } else {
       setScanButtons(false);
-      statusEl.textContent = state.status === 'failed' ? 'Last scan failed' : 'Idle';
+      statusEl.textContent = state.status === 'failed' ? '上次扫描失败' : '空闲';
 
       if (previousScanStatus === 'running') {
         if (state.status === 'completed') {
-          showToast('Scan complete! Loading results...');
+          showToast('扫描完成，正在加载最新结果...');
           await loadScanList();
         } else if (state.status === 'failed') {
-          showToast('Scan failed. Check the scan log for details.');
+          showToast('扫描失败，请检查扫描日志。');
         }
       }
     }
 
     previousScanStatus = state.status;
   } catch (e) {
-    document.getElementById('scanStatus').textContent = 'Status unavailable';
+    document.getElementById('scanStatus').textContent = '状态不可用';
   }
 }
 
@@ -695,6 +911,7 @@ function showToast(msg) {
 }
 
 loadScanList();
+loadSystemInfo();
 refreshScanStatus();
 setInterval(refreshScanStatus, 5000);
 </script>
@@ -711,6 +928,11 @@ def index():
 @app.route("/api/scans")
 def api_scans():
     return jsonify(get_scan_files())
+
+
+@app.route("/api/system-info")
+def api_system_info():
+    return jsonify(SYSTEM_INFO)
 
 
 @app.route("/api/scan")
@@ -748,16 +970,7 @@ def api_run_scan():
             return jsonify({"success": False, "error": "A scheduled or manual scan is already running"}), 409
 
         python = str(VENV_PYTHON) if VENV_PYTHON.exists() else sys.executable
-        cmd = [
-            "/usr/bin/flock",
-            "-n",
-            str(SCAN_LOCK_FILE),
-            python,
-            "run_optimized_scan.py",
-            "--conservative",
-            "--git-storage",
-            "--clear-progress",
-        ]
+        cmd = ["/usr/bin/flock", "-n", str(SCAN_LOCK_FILE), python, *SCAN_COMMAND_ARGS]
         if not full:
             cmd.append("--test-mode")
 
