@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import sys
 from datetime import datetime
@@ -33,6 +34,7 @@ from src.screening.benchmark import (
 from src.screening.signal_engine import score_buy_signal, score_sell_signal
 from src.data.enhanced_fundamentals import EnhancedFundamentalsFetcher
 from src.notifications.telegram_notifier import TelegramNotifier
+from src.config.scan_settings import UNIVERSE_MODES, read_scan_settings
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,7 +43,35 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def save_report(results, buy_signals, sell_signals, spy_analysis, breadth, output_dir="./data/daily_scans"):
+def _json_safe(value):
+    """Convert numpy/pandas scalar values while retaining numeric JSON types."""
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except (ValueError, TypeError):
+            pass
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except (ValueError, TypeError):
+            pass
+    return value
+
+
+def save_report(
+    results,
+    buy_signals,
+    sell_signals,
+    spy_analysis,
+    breadth,
+    universe_label,
+    result_limit,
+    output_dir="./data/daily_scans",
+):
     """Save comprehensive report."""
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
@@ -50,9 +80,10 @@ def save_report(results, buy_signals, sell_signals, spy_analysis, breadth, outpu
 
     output = []
     output.append("="*80)
-    output.append("OPTIMIZED FULL MARKET SCAN - ALL US STOCKS")
+    output.append(f"OPTIMIZED STOCK SCAN - {universe_label}")
     output.append(f"Scan Date: {date_str}")
     output.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    output.append(f"Displayed Per Signal Type: Top {result_limit}")
     output.append("="*80)
     output.append("")
 
@@ -96,7 +127,7 @@ def save_report(results, buy_signals, sell_signals, spy_analysis, breadth, outpu
     output.append("")
 
     if buy_signals:
-        for i, signal in enumerate(buy_signals[:50], 1):
+        for i, signal in enumerate(buy_signals[:result_limit], 1):
             score = signal['score']
             # Score-based emoji (green/yellow with star for exceptional)
             if score >= 90:
@@ -189,13 +220,10 @@ def save_report(results, buy_signals, sell_signals, spy_analysis, breadth, outpu
             if signal.get('fundamental_snapshot'):
                 output.append(signal['fundamental_snapshot'])
 
-        if len(buy_signals) > 50:
+        if len(buy_signals) > result_limit:
             output.append(f"\n{'='*80}")
-            output.append(f"ADDITIONAL BUYS ({len(buy_signals)-50} more)")
+            output.append(f"ADDITIONAL BUYS HIDDEN ({len(buy_signals)-result_limit} more; see JSON audit file)")
             output.append(f"{'='*80}\n")
-            remaining = [s['ticker'] for s in buy_signals[50:]]
-            for i in range(0, len(remaining), 10):
-                output.append(", ".join(remaining[i:i+10]))
     else:
         output.append("✗ NO BUY SIGNALS TODAY")
 
@@ -206,7 +234,7 @@ def save_report(results, buy_signals, sell_signals, spy_analysis, breadth, outpu
     output.append("")
 
     if sell_signals:
-        for i, signal in enumerate(sell_signals[:30], 1):
+        for i, signal in enumerate(sell_signals[:result_limit], 1):
             score = signal['score']
             severity = signal['severity']
 
@@ -250,13 +278,10 @@ def save_report(results, buy_signals, sell_signals, spy_analysis, breadth, outpu
             if signal.get('fundamental_snapshot'):
                 output.append(signal['fundamental_snapshot'])
 
-        if len(sell_signals) > 30:
+        if len(sell_signals) > result_limit:
             output.append(f"\n{'='*80}")
-            output.append(f"ADDITIONAL SELLS ({len(sell_signals)-30} more)")
+            output.append(f"ADDITIONAL SELLS HIDDEN ({len(sell_signals)-result_limit} more; see JSON audit file)")
             output.append(f"{'='*80}\n")
-            remaining = [s['ticker'] for s in sell_signals[30:]]
-            for i in range(0, len(remaining), 10):
-                output.append(", ".join(remaining[i:i+10]))
     else:
         output.append("✗ NO SELL SIGNALS TODAY")
 
@@ -274,6 +299,28 @@ def save_report(results, buy_signals, sell_signals, spy_analysis, breadth, outpu
     latest_path = Path(output_dir) / "latest_optimized_scan.txt"
     with open(latest_path, 'w', encoding='utf-8') as f:
         f.write(report_text)
+
+    audit_payload = {
+        "generated_at": datetime.now().astimezone().isoformat(),
+        "universe": universe_label,
+        "result_limit": result_limit,
+        "statistics": {
+            "total_universe": results["total_processed"],
+            "total_analyzed": results["total_analyzed"],
+            "processing_time_seconds": results["processing_time_seconds"],
+            "error_rate": results["error_rate"],
+        },
+        "buy_signals": buy_signals,
+        "sell_signals": sell_signals,
+        "spy_analysis": spy_analysis,
+        "breadth": breadth,
+    }
+    audit_path = Path(output_dir) / f"optimized_scan_{timestamp}.json"
+    with audit_path.open("w", encoding="utf-8") as audit_file:
+        json.dump(_json_safe(audit_payload), audit_file, ensure_ascii=False, indent=2, default=str)
+    latest_audit_path = Path(output_dir) / "latest_optimized_scan.json"
+    with latest_audit_path.open("w", encoding="utf-8") as audit_file:
+        json.dump(_json_safe(audit_payload), audit_file, ensure_ascii=False, indent=2, default=str)
 
     logger.info(f"Report saved: {filepath}")
     print(report_text)
@@ -296,6 +343,7 @@ def main():
     parser.add_argument('--git-storage', action='store_true', help='Use Git-based storage for fundamentals (recommended)')
 
     args = parser.parse_args()
+    scan_settings = read_scan_settings()
 
     # Presets
     if args.conservative:
@@ -321,13 +369,15 @@ def main():
         # Fetch universe
         universe_fetcher = USStockUniverseFetcher()
         logger.info("Fetching stock universe...")
-        tickers = universe_fetcher.fetch_universe()
+        universe_mode = scan_settings["universe_mode"]
+        tickers = universe_fetcher.fetch_by_mode(universe_mode)
 
         if not tickers:
             logger.error("Failed to fetch universe")
             sys.exit(1)
 
-        logger.info(f"Universe: {len(tickers):,} stocks")
+        universe_label = UNIVERSE_MODES[universe_mode]
+        logger.info("Universe: %s (%d stocks)", universe_label, len(tickers))
 
         if args.test_mode:
             tickers = tickers[:100]
@@ -337,7 +387,9 @@ def main():
         processor = OptimizedBatchProcessor(
             max_workers=args.workers,
             rate_limit_delay=args.delay,
-            use_git_storage=args.git_storage
+            use_git_storage=args.git_storage,
+            use_price_cache=scan_settings["price_cache_enabled"],
+            price_cache_full_refresh_days=scan_settings["price_cache_full_refresh_days"],
         )
 
         if args.git_storage:
@@ -387,7 +439,18 @@ def main():
                         )
                         buy_signals.append(signal)
 
-        buy_signals = sorted(buy_signals, key=lambda x: x['score'], reverse=True)
+        entry_rank = {"Good": 2, "Extended": 1, "Poor": 0}
+        buy_signals = sorted(
+            buy_signals,
+            key=lambda signal: (
+                -float(signal.get("score", 0)),
+                -float(signal.get("minervini_template_score", 0)),
+                -entry_rank.get(signal.get("entry_quality"), -1),
+                -float(signal.get("details", {}).get("rs_slope", -999)),
+                -float(signal.get("details", {}).get("vcp_data", {}).get("quality", 0)),
+                signal.get("ticker", ""),
+            ),
+        )
 
         # Sell signals
         sell_signals = []
@@ -411,10 +474,27 @@ def main():
                         )
                         sell_signals.append(signal)
 
-        sell_signals = sorted(sell_signals, key=lambda x: x['score'], reverse=True)
+        severity_rank = {"critical": 3, "high": 2, "medium": 1, "low": 0}
+        sell_signals = sorted(
+            sell_signals,
+            key=lambda signal: (
+                -float(signal.get("score", 0)),
+                -severity_rank.get(signal.get("severity"), -1),
+                float(signal.get("details", {}).get("rs_slope", 999)),
+                signal.get("ticker", ""),
+            ),
+        )
 
         # Report
-        report_path = save_report(results, buy_signals, sell_signals, spy_analysis, breadth)
+        report_path = save_report(
+            results,
+            buy_signals,
+            sell_signals,
+            spy_analysis,
+            breadth,
+            universe_label=universe_label,
+            result_limit=scan_settings["result_limit"],
+        )
 
         TelegramNotifier().send_scan_summary(
             buy_signals=buy_signals,
@@ -423,6 +503,7 @@ def main():
             breadth=breadth,
             report_path=report_path,
             is_test=args.test_mode,
+            result_limit=scan_settings["result_limit"],
         )
 
         # Show FMP usage if enabled

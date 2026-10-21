@@ -27,6 +27,12 @@ from flask import Flask, jsonify, redirect, render_template_string, request, ses
 from dotenv import load_dotenv
 from werkzeug.security import check_password_hash
 
+from src.config.scan_settings import (
+    UNIVERSE_MODES,
+    read_scan_settings,
+    write_scan_settings,
+)
+
 PROJECT_ROOT = Path(__file__).parent.resolve()
 load_dotenv(PROJECT_ROOT / ".env")
 
@@ -63,17 +69,17 @@ SYSTEM_INFO = {
         "overlap_protection": "/app/data/.scan.lock（手动与定时任务共用）",
     },
     "runtime": {
-        "universe_size": "约 3,700–3,800 只美股",
+        "universe_size": "由界面配置决定",
         "test_size": 100,
-        "full_scan_time": "通常 60–90 分钟，数据源限流或重试时可能更久",
+        "full_scan_time": "指数并集通常约 10–20 分钟；全部美股通常约 60–90 分钟",
         "workers": 2,
         "request_delay": "全局价格请求之间至少间隔 1.0 秒",
-        "price_refresh": "每次重新获取每只股票 5 年日线；最近约 252 个交易日用于技术分析",
+        "price_refresh": "首次获取五年日线，之后增量更新；每 30 天完整校验一次",
         "fundamental_cache": "财报季缓存 7 天，非财报季缓存 90 天",
         "telegram": "全量和定时扫描完成后通知；测试扫描默认不通知",
     },
     "filters": [
-        {"name": "上市标的", "value": "NASDAQ / NYSE / AMEX 普通股", "meaning": "排除 ETF、基金、债券、权证、优先股和特殊代码"},
+        {"name": "股票池", "value": "由扫描配置决定", "meaning": "默认标普 500 + 纳斯达克 100；可随时切回原全部美股模式"},
         {"name": "历史数据", "value": "至少 200 个交易日", "meaning": "确保均线和阶段判断有足够样本"},
         {"name": "股价", "value": "$5–$10,000", "meaning": "排除低价股和明显异常价格"},
         {"name": "流动性", "value": "20 日平均成交量 ≥ 100,000", "meaning": "排除成交过于稀疏的股票"},
@@ -130,6 +136,7 @@ SYSTEM_INFO = {
 def _build_system_info():
     info = json.loads(json.dumps(SYSTEM_INFO, ensure_ascii=False))
     config = _read_schedule_config()
+    scan_settings = read_scan_settings()
     weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
     selected_days = "、".join(weekday_names[index] for index in config["weekdays"])
     info["schedule"].update(config)
@@ -142,6 +149,16 @@ def _build_system_info():
             "state": _read_json_file(SCHEDULER_STATE_FILE, {}),
         }
     )
+    info["scan"] = {
+        **scan_settings,
+        "universe_label": UNIVERSE_MODES[scan_settings["universe_mode"]],
+        "universe_options": [
+            {"value": value, "label": label}
+            for value, label in UNIVERSE_MODES.items()
+        ],
+    }
+    info["runtime"]["universe_size"] = info["scan"]["universe_label"]
+    info["filters"][0]["value"] = info["scan"]["universe_label"]
     return info
 
 
@@ -754,6 +771,7 @@ function rows(items, points = false) {
 
 function renderSystemInfo(info) {
   const schedule = info.schedule;
+  const scan = info.scan;
   const runtime = info.runtime;
   const weekdayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
   const timeValue = `${String(schedule.hour).padStart(2, '0')}:${String(schedule.minute).padStart(2, '0')}`;
@@ -784,6 +802,24 @@ function renderSystemInfo(info) {
         <div class="code-block">${schedule.command}</div>
       </div>
     </div>
+    <div class="grid-2" style="margin-top:16px">
+      <div class="card">
+        <h2>扫描配置</h2>
+        <div class="form-row"><label>股票池</label><div><select class="form-control" id="universeMode">${scan.universe_options.map(option => `<option value="${option.value}" ${option.value === scan.universe_mode ? 'selected' : ''}>${option.label}</option>`).join('')}</select></div></div>
+        <div class="form-row"><label>每类展示数量</label><div><input class="form-control" id="resultLimit" type="number" min="5" max="100" step="1" value="${scan.result_limit}"><div class="sub" style="margin-top:5px">Dashboard 和 Telegram 仅展示 Top N，完整排序保存在 JSON 审计报告中。</div></div></div>
+        <button class="btn primary" onclick="saveScanSettings()">保存扫描配置</button>
+        <span id="scanSettingsSaveStatus" style="margin-left:10px;color:var(--muted);font-size:12px"></span>
+      </div>
+      <div class="card">
+        <h2>行情缓存</h2>
+        <div class="next-run">
+          <div>增量缓存：<strong>${scan.price_cache_enabled ? '已启用' : '已停用'}</strong></div>
+          <div>完整历史校验：<strong>每 ${scan.price_cache_full_refresh_days} 天</strong></div>
+          <div>缓存范围：<strong>滚动五年日线</strong></div>
+        </div>
+        <div class="notice" style="margin-top:16px">首次扫描下载五年历史；日常扫描只补最近交易日并合并去重。发生拆股时立即重建完整历史，定期完整校验可修复复权和上游数据调整。</div>
+      </div>
+    </div>
     <div class="card" style="margin-top:16px">
       <h2>扫描运行方式</h2>
       <ul class="info-list">
@@ -800,7 +836,7 @@ function renderSystemInfo(info) {
     </div>`;
 
   document.getElementById('rulesInfo').innerHTML = `
-    <div class="notice" style="margin-bottom:16px"><strong>为什么当前全量扫描很慢：</strong>五年数据用于“最大回撤超过 90%”的历史风险过滤，但当前实现为了简单，每天逐只重新下载完整五年数据，再截取最近约 252 个交易日做技术分析。这个设计能保证数据新鲜，却造成不必要的重复下载。合理优化是首次建立五年缓存，之后增量补最新交易日，并定期校验完整历史。</div>
+    <div class="notice" style="margin-bottom:16px"><strong>行情缓存机制：</strong>五年数据用于“最大回撤超过 90%”的历史风险过滤，最近约 252 个交易日用于技术分析。系统首次建立五年缓存，之后只增量补最近交易日，并每 ${scan.price_cache_full_refresh_days} 天完整校验历史；切换股票池不会删除任何已有缓存。</div>
     <details class="rule-group" open>
       <summary>股票池初筛与市场环境门槛</summary>
       <div class="detail-content">
@@ -858,6 +894,36 @@ async function saveSchedule() {
     renderSystemInfo(result);
     document.getElementById('scheduleSaveStatus').textContent = '保存成功';
     showToast('定时任务配置已更新，无需重启容器。');
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+async function saveScanSettings() {
+  const status = document.getElementById('scanSettingsSaveStatus');
+  const resultLimit = Number(document.getElementById('resultLimit').value);
+  if (!Number.isInteger(resultLimit) || resultLimit < 5 || resultLimit > 100) {
+    status.textContent = '展示数量必须在 5–100 之间';
+    return;
+  }
+  status.textContent = '正在保存...';
+  try {
+    const response = await fetch('api/scan-settings', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+      body: JSON.stringify({
+        universe_mode: document.getElementById('universeMode').value,
+        result_limit: resultLimit,
+        price_cache_enabled: true,
+        price_cache_full_refresh_days: 30
+      })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || '保存失败');
+    systemInfoData = result;
+    renderSystemInfo(result);
+    document.getElementById('scanSettingsSaveStatus').textContent = '保存成功';
+    showToast('扫描配置已更新，将从下一次扫描开始生效。');
   } catch (error) {
     status.textContent = error.message;
   }
@@ -1255,6 +1321,21 @@ def api_schedule():
         "minute": minute,
     }
     _write_schedule_config(config)
+    return jsonify(_build_system_info())
+
+
+@app.route("/api/scan-settings", methods=["PUT"])
+def api_scan_settings():
+    if not secrets.compare_digest(request.headers.get("X-CSRF-Token", ""), session.get("csrf_token", "")):
+        return jsonify({"error": "CSRF 校验失败"}), 400
+
+    body = request.get_json(silent=True) or {}
+    settings = read_scan_settings()
+    settings.update(body)
+    try:
+        write_scan_settings(settings)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     return jsonify(_build_system_info())
 
 

@@ -70,6 +70,7 @@ class TelegramNotifier:
         breadth: Dict,
         report_path: Path,
         is_test: bool = False,
+        result_limit: int = 20,
     ) -> bool:
         if not self.configured:
             logger.info("Telegram notifications disabled: bot token/chat ID not configured")
@@ -87,9 +88,13 @@ class TelegramNotifier:
             f"Phase 2 breadth: {breadth.get('phase_2_pct', 0):.1f}%",
             "",
         ]
-        lines.extend(self._ticker_lines("BUY", buy_signals))
+        lines.extend(self._ticker_lines(f"BUY Top {result_limit}", buy_signals[:result_limit]))
+        if len(buy_signals) > result_limit:
+            lines.append(f"符合条件共 {len(buy_signals)} 个")
         lines.append("")
-        lines.extend(self._ticker_lines("SELL", sell_signals))
+        lines.extend(self._ticker_lines(f"SELL Top {result_limit}", sell_signals[:result_limit]))
+        if len(sell_signals) > result_limit:
+            lines.append(f"符合条件共 {len(sell_signals)} 个")
         lines.extend(["", f"Report: <code>{html.escape(Path(report_path).name)}</code>"])
 
         chunks = []

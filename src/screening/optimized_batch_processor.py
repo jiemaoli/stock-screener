@@ -17,11 +17,10 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import pandas as pd
-import yfinance as yf
-
 from src.data.fetcher import YahooFinanceFetcher
 from src.data.fundamentals_fetcher import fetch_quarterly_financials, analyze_fundamentals_for_signal
 from src.data.git_storage_fetcher import GitStorageFetcher
+from src.data.price_history_cache import RollingPriceHistoryCache
 from ..screening.phase_indicators import classify_phase, calculate_relative_strength, detect_vcp_pattern
 
 logging.basicConfig(
@@ -41,7 +40,9 @@ class OptimizedBatchProcessor:
         max_workers: int = 3,  # Conservative: 3 workers
         rate_limit_delay: float = 0.5,  # 0.5 sec = 2 TPS per worker
         batch_size: int = 100,
-        use_git_storage: bool = False  # Use Git-based fundamental storage
+        use_git_storage: bool = False,  # Use Git-based fundamental storage
+        use_price_cache: bool = True,
+        price_cache_full_refresh_days: int = 30,
     ):
         """Initialize optimized processor.
 
@@ -56,6 +57,11 @@ class OptimizedBatchProcessor:
         self.fetcher = YahooFinanceFetcher(cache_dir=cache_dir)
         self.git_fetcher = GitStorageFetcher() if use_git_storage else None
         self.use_git_storage = use_git_storage
+        self.use_price_cache = use_price_cache
+        self.price_history_cache = RollingPriceHistoryCache(
+            cache_dir=str(Path(cache_dir) / "price_history_5y"),
+            full_refresh_days=price_cache_full_refresh_days,
+        )
         self.results_dir = Path(results_dir)
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -154,10 +160,9 @@ class OptimizedBatchProcessor:
         """Fetch SPY benchmark data."""
         try:
             logger.info("Fetching SPY data...")
-            # Use 1 year for price data (not 2 years - 50% less data)
-            # Use same fetcher as stocks for consistency
-            if self.use_git_storage and self.git_fetcher:
-                spy_hist = self.git_fetcher.fetch_price_fresh('SPY')
+            if self.use_price_cache:
+                spy_long_hist = self.price_history_cache.fetch('SPY')
+                spy_hist = spy_long_hist.tail(252)
             else:
                 spy_hist = self.fetcher.fetch_price_history('SPY', period='1y')
 
@@ -204,28 +209,13 @@ class OptimizedBatchProcessor:
 
             self.total_requests += 1
 
-            # Fetch price history (5 years to check drawdown, use last 1y for analysis)
-            # This is more efficient than two separate fetches
-            if self.use_git_storage and self.git_fetcher:
-                # Git fetcher only does 1y, fetch 5y for drawdown check first
-                import yfinance as yf
-                long_hist = yf.Ticker(ticker).history(period='5y', interval='1d')
-
-                if not long_hist.empty:
-                    # Use last 1 year for technical analysis
-                    price_data = long_hist.tail(252) if len(long_hist) > 252 else long_hist
-                else:
-                    # Fallback to git fetcher if 5y fails
-                    price_data = self.git_fetcher.fetch_price_fresh(ticker)
-                    long_hist = price_data
+            # Five years are retained for the severe drawdown filter, while
+            # technical analysis only uses the most recent 252 sessions.
+            if self.use_price_cache:
+                long_hist = self.price_history_cache.fetch(ticker)
             else:
-                # Regular fetcher - fetch 5y once
                 long_hist = self.fetcher.fetch_price_history(ticker, period='5y')
-                if not long_hist.empty:
-                    # Use last 1 year for technical analysis
-                    price_data = long_hist.tail(252) if len(long_hist) > 252 else long_hist
-                else:
-                    price_data = pd.DataFrame()
+            price_data = long_hist.tail(252) if not long_hist.empty else pd.DataFrame()
 
             if price_data.empty or len(price_data) < 200:
                 self.filtered_count += 1
