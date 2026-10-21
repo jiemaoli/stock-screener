@@ -70,6 +70,7 @@ def save_report(
     breadth,
     universe_label,
     result_limit,
+    is_test=False,
     output_dir="./data/daily_scans",
 ):
     """Save comprehensive report."""
@@ -292,11 +293,14 @@ def save_report(
     report_text = "\n".join(output)
 
     # Save
-    filepath = Path(output_dir) / f"optimized_scan_{timestamp}.txt"
+    report_prefix = "test_scan" if is_test else "optimized_scan"
+    filepath = Path(output_dir) / f"{report_prefix}_{timestamp}.txt"
     with open(filepath, 'w', encoding='utf-8') as f:
         f.write(report_text)
 
-    latest_path = Path(output_dir) / "latest_optimized_scan.txt"
+    latest_path = Path(output_dir) / (
+        "latest_test_scan.txt" if is_test else "latest_optimized_scan.txt"
+    )
     with open(latest_path, 'w', encoding='utf-8') as f:
         f.write(report_text)
 
@@ -315,10 +319,12 @@ def save_report(
         "spy_analysis": spy_analysis,
         "breadth": breadth,
     }
-    audit_path = Path(output_dir) / f"optimized_scan_{timestamp}.json"
+    audit_path = Path(output_dir) / f"{report_prefix}_{timestamp}.json"
     with audit_path.open("w", encoding="utf-8") as audit_file:
         json.dump(_json_safe(audit_payload), audit_file, ensure_ascii=False, indent=2, default=str)
-    latest_audit_path = Path(output_dir) / "latest_optimized_scan.json"
+    latest_audit_path = Path(output_dir) / (
+        "latest_test_scan.json" if is_test else "latest_optimized_scan.json"
+    )
     with latest_audit_path.open("w", encoding="utf-8") as audit_file:
         json.dump(_json_safe(audit_payload), audit_file, ensure_ascii=False, indent=2, default=str)
 
@@ -494,6 +500,7 @@ def main():
             breadth,
             universe_label=universe_label,
             result_limit=scan_settings["result_limit"],
+            is_test=args.test_mode,
         )
 
         TelegramNotifier().send_scan_summary(

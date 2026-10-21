@@ -447,14 +447,6 @@ def parse_scan_file(filepath):
     return data
 
 
-def get_scan_files():
-    """Get list of available scan files, newest first."""
-    if not SCAN_DIR.exists():
-        return []
-    files = sorted(SCAN_DIR.glob("optimized_scan_*.txt"), reverse=True)
-    return [{"name": f.stem, "path": f.name, "date": f.stem.replace("optimized_scan_", "")} for f in files]
-
-
 LOGIN_HTML = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -581,7 +573,6 @@ DASHBOARD_HTML = """
   .no-data { text-align: center; padding: 60px 20px; color: var(--muted); }
   .no-data h2 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
 
-  .scan-select { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 6px; font-size: 13px; }
 
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 6px; vertical-align: middle; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -627,7 +618,6 @@ DASHBOARD_HTML = """
   </div>
   <div class="actions">
     <span class="scan-status" id="scanStatus">空闲</span>
-    <select class="scan-select" id="scanSelect" onchange="loadScan(this.value)"></select>
     <button class="btn" onclick="runScan(false)" id="testBtn">测试扫描（100只）</button>
     <button class="btn primary" onclick="runScan(true)" id="fullBtn">全量扫描</button>
     <form method="post" action="{{ url_for('logout') }}" style="margin:0">
@@ -647,7 +637,7 @@ DASHBOARD_HTML = """
   <section class="tab-panel active" id="dashboardTab">
     <div class="no-data" id="noData" style="display:none">
       <h2>暂无扫描数据</h2>
-      <p>请先运行一次测试扫描</p>
+      <p>请先运行一次全量扫描</p>
     </div>
     <div id="dashboard" style="display:none">
 
@@ -929,28 +919,8 @@ async function saveScanSettings() {
   }
 }
 
-async function loadScanList() {
-  const res = await fetch('api/scans');
-  const scans = await res.json();
-  const sel = document.getElementById('scanSelect');
-  sel.innerHTML = '';
-  if (scans.length === 0) {
-    sel.innerHTML = '<option>暂无扫描记录</option>';
-    document.getElementById('noData').style.display = '';
-    document.getElementById('dashboard').style.display = 'none';
-    return;
-  }
-  scans.forEach((s, i) => {
-    const opt = document.createElement('option');
-    opt.value = s.path;
-    opt.textContent = s.date.replace('_', ' ');
-    sel.appendChild(opt);
-  });
-  loadScan(scans[0].path);
-}
-
-async function loadScan(path) {
-  const res = await fetch('api/scan?path=' + encodeURIComponent(path));
+async function loadLatestScan() {
+  const res = await fetch('api/scan');
   const data = await res.json();
   if (data.error) {
     document.getElementById('noData').style.display = '';
@@ -1124,9 +1094,12 @@ function toggleReasons(btn) {
 }
 
 async function runScan(full) {
+  const scan = systemInfoData && systemInfoData.scan ? systemInfoData.scan : {};
+  const universeLabel = scan.universe_label || '当前配置的股票池';
+  const expectedTime = scan.universe_mode === 'all_us' ? '通常需要 60–90 分钟' : '首次通常需要 10–20 分钟，后续增量扫描通常更快';
   const confirmation = full
-    ? '确认开始全量扫描吗？将扫描约 3,700–3,800 只美股，通常需要 60–90 分钟，期间不能启动其他扫描。'
-    : '确认开始测试扫描吗？将扫描股票池前 100 只，通常需要约 2 分钟，测试结果默认不推送 Telegram。';
+    ? `确认开始全量扫描吗？将扫描“${universeLabel}”，${expectedTime}，期间不能启动其他扫描。`
+    : `确认开始测试扫描吗？将扫描“${universeLabel}”的前 100 只，测试结果不会替换正式 Dashboard，也默认不推送 Telegram。`;
   if (!window.confirm(confirmation)) return;
 
   const btn = full ? document.getElementById('fullBtn') : document.getElementById('testBtn');
@@ -1188,8 +1161,12 @@ async function refreshScanStatus() {
 
       if (previousScanStatus === 'running') {
         if (state.status === 'completed') {
-          showToast('扫描完成，正在加载最新结果...');
-          await loadScanList();
+          if (state.full === true) {
+            showToast('全量扫描完成，正在加载最新结果...');
+            await loadLatestScan();
+          } else {
+            showToast('测试扫描完成，正式 Dashboard 结果未被替换。');
+          }
         } else if (state.status === 'failed') {
           showToast('扫描失败，请检查扫描日志。');
         }
@@ -1211,7 +1188,7 @@ function showToast(msg) {
   t._timer = setTimeout(() => { t.style.opacity = '0'; }, 5000);
 }
 
-loadScanList();
+loadLatestScan();
 loadSystemInfo();
 refreshScanStatus();
 setInterval(refreshScanStatus, 5000);
@@ -1284,11 +1261,6 @@ def index():
     return render_template_string(DASHBOARD_HTML, csrf_token=session["csrf_token"])
 
 
-@app.route("/api/scans")
-def api_scans():
-    return jsonify(get_scan_files())
-
-
 @app.route("/api/system-info")
 def api_system_info():
     return jsonify(_build_system_info())
@@ -1341,14 +1313,7 @@ def api_scan_settings():
 
 @app.route("/api/scan")
 def api_scan():
-    requested_path = request.args.get("path", "")
-    if requested_path:
-        path = (SCAN_DIR / requested_path).resolve()
-        scan_root = SCAN_DIR.resolve()
-        if path.parent != scan_root or not path.name.startswith("optimized_scan_") or path.suffix != ".txt":
-            return jsonify({"error": "Invalid scan path"}), 400
-    else:
-        path = (SCAN_DIR / "latest_optimized_scan.txt").resolve()
+    path = (SCAN_DIR / "latest_optimized_scan.txt").resolve()
 
     if not path.exists():
         return jsonify({"error": "File not found"})

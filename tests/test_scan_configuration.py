@@ -91,3 +91,34 @@ def test_rolling_price_cache_full_then_incremental(tmp_path, monkeypatch):
     assert second.index.is_unique
     assert second.index.is_monotonic_increasing
     assert second.loc[recent_dates[-1], "Close"] == 2009
+
+
+def test_test_scan_does_not_replace_latest_full_report(tmp_path, monkeypatch):
+    import run_optimized_scan as scan_module
+
+    monkeypatch.setattr(scan_module, "format_benchmark_summary", lambda *_: "BENCHMARK")
+    latest_full = tmp_path / "latest_optimized_scan.txt"
+    latest_full.write_text("existing production report", encoding="utf-8")
+
+    report_path = scan_module.save_report(
+        {
+            "total_processed": 100,
+            "total_analyzed": 95,
+            "processing_time_seconds": 60,
+            "actual_tps": 1,
+            "error_rate": 0,
+        },
+        [],
+        [],
+        {},
+        {},
+        universe_label="test universe",
+        result_limit=20,
+        is_test=True,
+        output_dir=str(tmp_path),
+    )
+
+    assert report_path.name.startswith("test_scan_")
+    assert latest_full.read_text(encoding="utf-8") == "existing production report"
+    assert (tmp_path / "latest_test_scan.txt").exists()
+    assert (tmp_path / "latest_test_scan.json").exists()
