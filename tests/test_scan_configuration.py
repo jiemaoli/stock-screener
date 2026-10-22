@@ -159,4 +159,17 @@ def test_dashboard_titles():
     assert "<h1>强势突破股票筛选器</h1>" in dashboard.DASHBOARD_HTML
     assert "美股选股系统" not in dashboard.LOGIN_HTML
     assert "美股选股系统" not in dashboard.DASHBOARD_HTML
+    assert 'href="/favicon.svg"' in dashboard.LOGIN_HTML
+    assert 'href="/favicon.svg"' in dashboard.DASHBOARD_HTML
+    assert "<svg" in dashboard.APP_ICON_SVG
+
+    client = dashboard.app.test_client()
+    resp = client.get("/favicon.svg")
+    assert resp.status_code == 200
+    assert resp.content_type.startswith("image/svg+xml")
+    assert b"<svg" in resp.data
+
+    login_resp = client.get("/login")
+    assert login_resp.status_code == 200
+    assert b"<svg" in login_resp.data
 

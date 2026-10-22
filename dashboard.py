@@ -24,7 +24,7 @@ from pathlib import Path
 from threading import Timer
 from zoneinfo import ZoneInfo
 
-from flask import Flask, jsonify, redirect, render_template_string, request, session, url_for
+from flask import Flask, Response, jsonify, redirect, render_template_string, request, session, url_for
 from dotenv import load_dotenv
 from werkzeug.security import check_password_hash
 
@@ -546,6 +546,52 @@ def get_scan_files():
     return reports
 
 
+APP_ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="breakoutGrad" x1="14" y1="46" x2="48" y2="14" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="50%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#22c55e"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded card -->
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="13.5" stroke="#3b82f6" stroke-opacity="0.35" stroke-width="1"/>
+
+  <!-- Resistance Level Line (Breakout barrier) -->
+  <line x1="9" y1="26" x2="55" y2="26" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="3.5 2.5" stroke-opacity="0.55"/>
+
+  <!-- Candlestick 1: Phase 1 Consolidation base -->
+  <line x1="16" y1="41" x2="16" y2="49" stroke="#64748b" stroke-width="1.2" stroke-linecap="round"/>
+  <rect x="14" y="43" width="4" height="5" rx="0.8" fill="#64748b"/>
+
+  <!-- Candlestick 2: Higher Low -->
+  <line x1="24" y1="36" x2="24" y2="46" stroke="#0ea5e9" stroke-width="1.2" stroke-linecap="round"/>
+  <rect x="22" y="38" width="4" height="6" rx="0.8" fill="#0ea5e9"/>
+
+  <!-- Candlestick 3: Testing Resistance -->
+  <line x1="32" y1="27" x2="32" y2="40" stroke="#06b6d4" stroke-width="1.2" stroke-linecap="round"/>
+  <rect x="30" y="29" width="4" height="8" rx="0.8" fill="#06b6d4"/>
+
+  <!-- Candlestick 4: Massive Stage 2 Breakout Candle -->
+  <line x1="40" y1="16" x2="40" y2="33" stroke="#22c55e" stroke-width="1.5" stroke-linecap="round"/>
+  <rect x="38" y="19" width="4" height="11" rx="0.8" fill="#22c55e"/>
+
+  <!-- Breakout dynamic trend curve -->
+  <path d="M14 46 C21 45, 26 38, 32 31 S42 20, 48 14" stroke="url(#breakoutGrad)" stroke-width="3" stroke-linecap="round" fill="none"/>
+
+  <!-- Arrowhead pointing to top-right -->
+  <path d="M38 14 H48 V24" stroke="#22c55e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+  <!-- Glow dot at resistance breakout point -->
+  <circle cx="35" cy="26" r="2.2" fill="#22c55e"/>
+</svg>"""
+
 LOGIN_HTML = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -553,12 +599,13 @@ LOGIN_HTML = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>登录·强势突破股票筛选器</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
   :root { --bg:#0f1117; --surface:#1a1d27; --border:#2a2d3a; --text:#e4e6eb; --muted:#8b8fa3; --blue:#3b82f6; --red:#ef4444; }
   * { box-sizing:border-box; }
   body { margin:0; min-height:100vh; display:grid; place-items:center; padding:20px; background:radial-gradient(circle at top, #18233b 0, var(--bg) 48%); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
   .login-card { width:100%; max-width:400px; background:rgba(26,29,39,.96); border:1px solid var(--border); border-radius:16px; padding:32px; box-shadow:0 24px 70px rgba(0,0,0,.4); }
-  .logo { width:48px; height:48px; display:grid; place-items:center; border-radius:12px; background:rgba(59,130,246,.15); color:#60a5fa; font-size:24px; margin-bottom:18px; }
+  .logo { width:48px; height:48px; display:grid; place-items:center; border-radius:12px; margin-bottom:18px; }
   h1 { font-size:22px; margin:0 0 8px; }
   .sub { color:var(--muted); font-size:13px; margin-bottom:24px; }
   label { display:block; color:var(--muted); font-size:12px; margin:14px 0 6px; }
@@ -570,7 +617,7 @@ LOGIN_HTML = """
 </head>
 <body>
   <form class="login-card" method="post" autocomplete="on">
-    <div class="logo">📈</div>
+    <div class="logo">{{ app_icon | safe }}</div>
     <h1>强势突破股票筛选器</h1>
     <div class="sub">登录后查看扫描结果、定时任务和选股规则</div>
     <label for="username">账号</label>
@@ -592,6 +639,7 @@ DASHBOARD_HTML = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>强势突破股票筛选器</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
   :root {
@@ -712,9 +760,12 @@ DASHBOARD_HTML = """
 <body>
 
 <div class="header">
-  <div>
-    <h1>强势突破股票筛选器</h1>
-    <div class="meta" id="headerMeta">正在加载...</div>
+  <div style="display:flex;align-items:center;gap:12px">
+    <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;flex-shrink:0">{{ app_icon | safe }}</div>
+    <div>
+      <h1>强势突破股票筛选器</h1>
+      <div class="meta" id="headerMeta">正在加载...</div>
+    </div>
   </div>
   <div class="actions">
     <span class="scan-status" id="scanStatus">空闲</span>
@@ -1329,7 +1380,7 @@ def require_login():
         or request.path == "/api/v1/capabilities"
     ):
         return _internal_api_auth_error()
-    if request.endpoint in {"login", "healthz"}:
+    if request.endpoint in {"login", "healthz", "favicon"}:
         return None
     if session.get("authenticated"):
         return None
@@ -1369,7 +1420,13 @@ def login():
             _record_login_failure(ip_address)
             error = "账号或密码不正确"
 
-    return render_template_string(LOGIN_HTML, error=error)
+    return render_template_string(LOGIN_HTML, error=error, app_icon=APP_ICON_SVG)
+
+
+@app.route("/favicon.ico")
+@app.route("/favicon.svg")
+def favicon():
+    return Response(APP_ICON_SVG, mimetype="image/svg+xml")
 
 
 @app.route("/healthz")
@@ -1387,7 +1444,7 @@ def logout():
 
 @app.route("/")
 def index():
-    return render_template_string(DASHBOARD_HTML, csrf_token=session["csrf_token"])
+    return render_template_string(DASHBOARD_HTML, csrf_token=session["csrf_token"], app_icon=APP_ICON_SVG)
 
 
 @app.route("/api/system-info")
