@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Interactive web dashboard for Stock Screener results.
+"""Interactive web dashboard for 强势突破股票筛选器 results.
 
 Usage:
     python dashboard.py                    # Start dashboard on port 5050
@@ -552,7 +552,7 @@ LOGIN_HTML = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>登录·美股选股系统</title>
+<title>登录·强势突破股票筛选器</title>
 <style>
   :root { --bg:#0f1117; --surface:#1a1d27; --border:#2a2d3a; --text:#e4e6eb; --muted:#8b8fa3; --blue:#3b82f6; --red:#ef4444; }
   * { box-sizing:border-box; }
@@ -571,7 +571,7 @@ LOGIN_HTML = """
 <body>
   <form class="login-card" method="post" autocomplete="on">
     <div class="logo">📈</div>
-    <h1>美股选股系统</h1>
+    <h1>强势突破股票筛选器</h1>
     <div class="sub">登录后查看扫描结果、定时任务和选股规则</div>
     <label for="username">账号</label>
     <input id="username" name="username" type="text" required autofocus autocomplete="username">
@@ -591,7 +591,7 @@ DASHBOARD_HTML = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>美股选股系统</title>
+<title>强势突破股票筛选器</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
   :root {
@@ -713,7 +713,7 @@ DASHBOARD_HTML = """
 
 <div class="header">
   <div>
-    <h1>美股选股系统</h1>
+    <h1>强势突破股票筛选器</h1>
     <div class="meta" id="headerMeta">正在加载...</div>
   </div>
   <div class="actions">
@@ -1703,7 +1703,7 @@ def open_browser(port):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Stock Screener Dashboard")
+    parser = argparse.ArgumentParser(description="强势突破股票筛选器 Dashboard")
     parser.add_argument("--port", type=int, default=5050)
     parser.add_argument("--scan", action="store_true", help="Run a test scan before launching")
     parser.add_argument("--full", action="store_true", help="With --scan, run full scan instead of test")

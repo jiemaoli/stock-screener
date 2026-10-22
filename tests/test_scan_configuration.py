@@ -148,3 +148,15 @@ def test_scan_history_lists_only_timestamped_formal_reports(tmp_path, monkeypatc
         "optimized_scan_20261021_041701.txt",
     ]
     assert [report["total_universe"] for report in reports] == [518, 100]
+
+
+def test_dashboard_titles():
+    import dashboard
+
+    assert "<title>登录·强势突破股票筛选器</title>" in dashboard.LOGIN_HTML
+    assert "<h1>强势突破股票筛选器</h1>" in dashboard.LOGIN_HTML
+    assert "<title>强势突破股票筛选器</title>" in dashboard.DASHBOARD_HTML
+    assert "<h1>强势突破股票筛选器</h1>" in dashboard.DASHBOARD_HTML
+    assert "美股选股系统" not in dashboard.LOGIN_HTML
+    assert "美股选股系统" not in dashboard.DASHBOARD_HTML
+
