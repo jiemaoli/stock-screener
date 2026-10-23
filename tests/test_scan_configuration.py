@@ -173,3 +173,17 @@ def test_dashboard_titles():
     assert login_resp.status_code == 200
     assert b"<svg" in login_resp.data
 
+
+def test_dashboard_schedule_and_tg_ui():
+    import dashboard
+
+    # Check key modern UI elements exist in DASHBOARD_HTML
+    assert "switch-slider" in dashboard.DASHBOARD_HTML
+    assert "weekday-pill" in dashboard.DASHBOARD_HTML
+    assert "dual-clocks" in dashboard.DASHBOARD_HTML
+    assert "terminal-card" in dashboard.DASHBOARD_HTML
+    assert "telegramBotToken" in dashboard.DASHBOARD_HTML
+    assert "scheduleTime" in dashboard.DASHBOARD_HTML
+    assert "--font-mono" in dashboard.DASHBOARD_HTML
+
+

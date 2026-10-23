@@ -661,33 +661,688 @@ DASHBOARD_HTML = """
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
   :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --border: #2a2d3a;
-    --text: #e4e6eb;
-    --muted: #8b8fa3;
+    --bg: #0d1117;
+    --surface: #161b26;
+    --surface-hover: #1e2433;
+    --surface-subtle: #131722;
+    --border: #262d3d;
+    --border-light: #363f54;
+    --text: #e6edf3;
+    --text-strong: #ffffff;
+    --muted: #8d96a7;
+    --muted-light: #b1b9c7;
     --green: #22c55e;
+    --green-bg: rgba(34, 197, 94, 0.12);
+    --green-border: rgba(34, 197, 94, 0.28);
     --red: #ef4444;
+    --red-bg: rgba(239, 68, 68, 0.12);
     --yellow: #eab308;
+    --yellow-bg: rgba(234, 179, 8, 0.12);
     --blue: #3b82f6;
+    --blue-bg: rgba(59, 130, 246, 0.12);
+    --blue-glow: rgba(59, 130, 246, 0.25);
     --purple: #a855f7;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: 1.5;
+  }
 
-  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; }
-  .header h1 { font-size: 20px; font-weight: 600; }
-  .header .meta { color: var(--muted); font-size: 13px; }
+  .font-mono { font-family: var(--font-mono) !important; }
+
+  /* Header */
+  .header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  }
+  .header h1 { font-size: 19px; font-weight: 700; letter-spacing: -0.2px; color: var(--text-strong); }
+  .header .meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
   .header .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
-  .btn { padding: 8px 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 13px; transition: all 0.15s; }
-  .btn:hover { border-color: var(--blue); }
-  .btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
-  .btn.primary:hover { opacity: 0.9; }
+  /* Buttons */
+  .btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    user-select: none;
+  }
+  .btn:hover { border-color: var(--blue); color: #fff; background: var(--surface-hover); }
+  .btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3); }
+  .btn.primary:hover { background: #2563eb; border-color: #2563eb; box-shadow: 0 4px 14px rgba(59, 130, 246, 0.45); }
+  .btn.secondary { background: var(--surface-subtle); border-color: var(--border); }
+  .btn.secondary:hover { border-color: var(--blue); color: #60a5fa; }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
+  /* Tab Navigation */
+  .tab-nav {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 2px;
+  }
+  .tab-btn {
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--muted);
+    padding: 12px 18px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border-radius: 6px 6px 0 0;
+  }
+  .tab-btn:hover { color: var(--text); background: rgba(255, 255, 255, 0.03); }
+  .tab-btn.active { color: #60a5fa; border-bottom-color: var(--blue); background: rgba(59, 130, 246, 0.06); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; animation: fadeIn 0.2s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* Cards */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+  @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    display: flex;
+    flex-direction: column;
+  }
+  .card:hover { border-color: var(--border-light); }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .card-header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .card-icon-badge {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: var(--blue-bg);
+    color: #60a5fa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+  }
+  .card-icon-badge.green { background: var(--green-bg); color: #4ade80; border-color: var(--green-border); }
+  .card-icon-badge.yellow { background: var(--yellow-bg); color: #facc15; border-color: rgba(234, 179, 8, 0.28); }
+  .card-icon-badge.purple { background: rgba(168, 85, 247, 0.12); color: #c084fc; border-color: rgba(168, 85, 247, 0.25); }
+
+  .card-title-group h2 {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-strong);
+    letter-spacing: -0.2px;
+    margin: 0;
+  }
+  .card-title-group p {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+
+  /* Form Elements & Inputs */
+  .config-form {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    flex: 1;
+  }
+  .form-row {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  @media (max-width: 600px) {
+    .form-row { grid-template-columns: 1fr; gap: 8px; }
+  }
+  .form-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #cbd5e1;
+    margin-top: 7px;
+    line-height: 1.4;
+  }
+  .form-label-desc {
+    display: block;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .form-control {
+    width: 100%;
+    max-width: 380px;
+    color: var(--text);
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-family: inherit;
+    transition: all 0.2s ease;
+  }
+  .form-control:focus {
+    border-color: var(--blue);
+    outline: none;
+    box-shadow: 0 0 0 3px var(--blue-glow);
+    background: var(--bg);
+  }
+  .form-control:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+    background: rgba(13, 17, 23, 0.6);
+  }
+
+  .form-control-static {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 14px;
+    border-radius: 8px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  .field-hint {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+  .field-hint code {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 2px 5px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #93c5fd;
+  }
+
+  /* Toggle Switch */
+  .switch-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 0;
+  }
+  .switch-control input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .switch-slider {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    background: #202636;
+    border: 1px solid #363f54;
+    border-radius: 24px;
+    transition: all 0.25s ease;
+    flex-shrink: 0;
+  }
+  .switch-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 2px;
+    bottom: 2px;
+    background: #94a3b8;
+    border-radius: 50%;
+    transition: all 0.25s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  }
+  .switch-control input:checked + .switch-slider {
+    background: #2563eb;
+    border-color: #3b82f6;
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.35);
+  }
+  .switch-control input:checked + .switch-slider:before {
+    transform: translateX(20px);
+    background: #ffffff;
+  }
+  .switch-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  /* Weekday Pill Buttons */
+  .weekday-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .weekday-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 7px 15px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+  }
+  .weekday-pill input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .weekday-pill:hover {
+    border-color: #4b5563;
+    color: var(--text);
+  }
+  .weekday-pill.active {
+    background: rgba(59, 130, 246, 0.16);
+    border-color: #3b82f6;
+    color: #60a5fa;
+    font-weight: 600;
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
+  }
+  .weekday-quick {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .btn-xs {
+    padding: 4px 10px;
+    font-size: 11px;
+    border-radius: 5px;
+    border: 1px dashed var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-xs:hover {
+    border-color: var(--blue);
+    color: #60a5fa;
+    background: rgba(59, 130, 246, 0.08);
+  }
+
+  /* Secret Input with SVG Eye Toggle */
+  .secret-input-wrap {
+    display: flex;
+    width: 100%;
+    max-width: 380px;
+  }
+  .secret-input-wrap .form-control {
+    border-radius: 8px 0 0 8px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.5px;
+    font-size: 13px;
+    max-width: none;
+  }
+  .secret-toggle {
+    width: 44px;
+    border: 1px solid var(--border);
+    border-left: 0;
+    border-radius: 0 8px 8px 0;
+    background: var(--surface-subtle);
+    color: var(--muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+  .secret-toggle:hover {
+    color: var(--text);
+    border-color: var(--blue);
+    background: rgba(59, 130, 246, 0.08);
+  }
+
+  /* Time Picker Wrap */
+  .time-picker-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .time-input {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    width: 140px;
+    text-align: center;
+    padding: 8px 12px;
+  }
+  .input-tag {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 5px;
+    background: rgba(234, 179, 8, 0.12);
+    color: #facc15;
+    border: 1px solid rgba(234, 179, 8, 0.25);
+  }
+
+  /* Input with prefix */
+  .input-with-prefix {
+    position: relative;
+    width: 100%;
+    max-width: 380px;
+  }
+  .input-prefix {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-weight: 700;
+    pointer-events: none;
+  }
+  .input-with-prefix .form-control {
+    padding-left: 32px;
+    font-family: var(--font-mono);
+    max-width: none;
+  }
+
+  /* Event Check Cards (Telegram Events) */
+  .event-cards-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 520px;
+  }
+  .event-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+  }
+  .event-card:hover {
+    border-color: #3b4258;
+    background: rgba(30, 36, 51, 0.6);
+  }
+  .event-card input {
+    margin-top: 3px;
+    width: 16px;
+    height: 16px;
+    accent-color: #3b82f6;
+    cursor: pointer;
+  }
+  .event-info { flex: 1; }
+  .event-title { font-size: 13px; font-weight: 600; color: var(--text-strong); }
+  .event-desc { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+
+  /* Dual Clocks & Status Banner */
+  .status-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 18px;
+  }
+  .status-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .status-sub {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+  }
+  .pulse-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .pulse-dot.green {
+    background: #22c55e;
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+    animation: pulseGreen 2s infinite;
+  }
+  .pulse-dot.yellow {
+    background: #eab308;
+    box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.7);
+    animation: pulseYellow 2s infinite;
+  }
+  .pulse-dot.red { background: #ef4444; }
+  @keyframes pulseGreen {
+    0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+    70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+  }
+  @keyframes pulseYellow {
+    0% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.7); }
+    70% { box-shadow: 0 0 0 6px rgba(234, 179, 8, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0); }
+  }
+
+  .dual-clocks {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  @media (max-width: 600px) { .dual-clocks { grid-template-columns: 1fr; } }
+
+  .clock-card {
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .clock-card.highlight {
+    border-color: rgba(59, 130, 246, 0.35);
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, var(--surface-subtle) 100%);
+  }
+  .clock-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted-light);
+  }
+  .clock-value {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-strong);
+    letter-spacing: 0.2px;
+  }
+  .clock-desc {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+
+  /* Terminal Box */
+  .terminal-card {
+    background: #090b10;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-top: 14px;
+  }
+  .terminal-header {
+    background: #141822;
+    padding: 7px 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .terminal-dots { display: flex; gap: 5px; }
+  .terminal-dots span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #373b4d;
+  }
+  .terminal-dots span:nth-child(1) { background: #ef4444; }
+  .terminal-dots span:nth-child(2) { background: #eab308; }
+  .terminal-dots span:nth-child(3) { background: #22c55e; }
+  .terminal-label {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--muted);
+    margin-left: 6px;
+  }
+  .terminal-body {
+    padding: 10px 14px;
+    font-size: 12px;
+    color: #93c5fd;
+    overflow-wrap: anywhere;
+    line-height: 1.6;
+  }
+
+  /* Card Footer Actions */
+  .card-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: auto;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .status-msg {
+    font-size: 12px;
+    padding: 5px 12px;
+    border-radius: 6px;
+    display: none;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+  }
+  .status-msg.success {
+    display: inline-flex;
+    background: var(--green-bg);
+    color: #4ade80;
+    border: 1px solid var(--green-border);
+  }
+  .status-msg.error {
+    display: inline-flex;
+    background: var(--red-bg);
+    color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.28);
+  }
+  .status-msg.loading {
+    display: inline-flex;
+    background: var(--blue-bg);
+    color: #93c5fd;
+    border: 1px solid rgba(59, 130, 246, 0.28);
+  }
+
+  /* Feature Note List */
+  .feature-notes {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    list-style: none;
+  }
+  .feature-note-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--muted-light);
+    line-height: 1.5;
+  }
+  .feature-note-icon {
+    font-size: 15px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .feature-note-item strong { color: var(--text-strong); }
+  .feature-note-item code {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 2px 5px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #93c5fd;
+  }
+
+  /* Badges */
+  .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; line-height: 1.2; }
+  .badge.good, .badge.green { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+  .badge.extended, .badge.yellow { background: var(--yellow-bg); color: var(--yellow); border: 1px solid rgba(234, 179, 8, 0.28); }
+  .badge.poor, .badge.red { background: var(--red-bg); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.28); }
+  .badge.blue { background: var(--blue-bg); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.28); }
+  .badge.critical, .badge.high { background: rgba(239, 68, 68, 0.22); color: var(--red); }
+  .badge.medium { background: var(--yellow-bg); color: var(--yellow); }
+
+  /* Stats Row & Old Cards */
   .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
   .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
   .stat-card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
@@ -698,46 +1353,30 @@ DASHBOARD_HTML = """
   .stat-card.blue .value { color: var(--blue); }
   .stat-card.yellow .value { color: var(--yellow); }
 
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
-  @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
-
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
-  .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
-
   .regime-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
-  .regime-badge.risk-on { background: rgba(34,197,94,0.15); color: var(--green); }
-  .regime-badge.risk-off { background: rgba(239,68,68,0.15); color: var(--red); }
-  .regime-badge.transitional { background: rgba(234,179,8,0.15); color: var(--yellow); }
+  .regime-badge.risk-on { background: var(--green-bg); color: var(--green); }
+  .regime-badge.risk-off { background: var(--red-bg); color: var(--red); }
+  .regime-badge.transitional { background: var(--yellow-bg); color: var(--yellow); }
 
   .chart-wrap { position: relative; height: 250px; }
 
   .signal-table { width: 100%; border-collapse: collapse; }
   .signal-table th { text-align: left; padding: 10px 12px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
   .signal-table td { padding: 12px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: top; }
-  .signal-table tr:hover { background: rgba(59,130,246,0.04); }
+  .signal-table tr:hover { background: rgba(59, 130, 246, 0.04); }
 
   .ticker { font-weight: 700; font-size: 14px; color: var(--blue); }
   .score-bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; width: 80px; display: inline-block; vertical-align: middle; margin-left: 6px; }
   .score-bar .fill { height: 100%; border-radius: 3px; }
   .score-num { font-weight: 600; font-size: 13px; }
 
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-  .badge.good { background: rgba(34,197,94,0.15); color: var(--green); }
-  .badge.extended { background: rgba(234,179,8,0.15); color: var(--yellow); }
-  .badge.poor { background: rgba(239,68,68,0.15); color: var(--red); }
-  .badge.critical { background: rgba(239,68,68,0.25); color: var(--red); }
-  .badge.high { background: rgba(239,68,68,0.15); color: var(--red); }
-  .badge.medium { background: rgba(234,179,8,0.15); color: var(--yellow); }
-
   .reasons-list { list-style: none; padding: 0; margin-top: 4px; }
   .reasons-list li { font-size: 11px; color: var(--muted); padding: 1px 0; }
-
   .expand-btn { background: none; border: none; color: var(--blue); cursor: pointer; font-size: 11px; padding: 2px 0; }
   .expand-btn:hover { text-decoration: underline; }
 
   .no-data { text-align: center; padding: 60px 20px; color: var(--muted); }
   .no-data h2 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
-
 
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 6px; vertical-align: middle; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -752,27 +1391,12 @@ DASHBOARD_HTML = """
   .param-table { width: 100%; border-collapse: collapse; }
   .param-table th, .param-table td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); font-size: 12px; vertical-align: top; }
   .param-table th { color: var(--muted); }
-  .code-block { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 10px 12px; color: #cbd5e1; font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; margin-top: 8px; }
+  .code-block { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 10px 12px; color: #cbd5e1; font: 12px var(--font-mono); overflow-wrap: anywhere; margin-top: 8px; }
   details.rule-group { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; }
   details.rule-group summary { cursor: pointer; padding: 16px 20px; font-size: 14px; font-weight: 600; }
   details.rule-group .detail-content { padding: 0 20px 20px; }
   .notice { padding: 12px 14px; border-left: 3px solid var(--yellow); background: rgba(234,179,8,.08); color: var(--muted); border-radius: 4px; font-size: 12px; line-height: 1.7; }
-  .tab-nav { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
-  .tab-btn { border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); padding: 11px 16px; cursor: pointer; font-size: 14px; }
-  .tab-btn.active { color: var(--text); border-bottom-color: var(--blue); }
-  .tab-panel { display: none; }
-  .tab-panel.active { display: block; }
-  .form-row { display: grid; grid-template-columns: 160px 1fr; gap: 16px; align-items: center; margin-bottom: 16px; }
-  .form-row label { font-size: 13px; color: var(--muted); }
-  .form-control { width: 100%; max-width: 360px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 9px 10px; }
-  .secret-input-wrap { display: flex; width: 100%; max-width: 360px; }
-  .secret-input-wrap .form-control { max-width: none; border-radius: 6px 0 0 6px; }
-  .secret-toggle { width: 42px; border: 1px solid var(--border); border-left: 0; border-radius: 0 6px 6px 0; background: var(--bg); color: var(--muted); cursor: pointer; font-size: 16px; }
-  .secret-toggle:hover { color: var(--text); border-color: var(--blue); }
-  .weekday-list { display: flex; flex-wrap: wrap; gap: 8px; }
-  .weekday-item { display: flex; gap: 5px; align-items: center; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
-  .next-run { font-size: 14px; line-height: 1.9; }
-  .next-run strong { color: var(--blue); }
+
   @media (max-width: 760px) {
     .header { padding: 14px 16px; align-items: flex-start; gap: 12px; flex-direction: column; }
     .container { padding: 16px; }
@@ -937,6 +1561,43 @@ function rows(items, points = false) {
   return items.map(item => `<tr><td><strong>${item.name}</strong></td>${points ? `<td>${item.points}</td>` : `<td>${item.value || '-'}</td>`}<td>${item.meaning}</td></tr>`).join('');
 }
 
+function setSaveStatus(el, type, msg) {
+  if (!el) return;
+  el.className = 'status-msg ' + type;
+  el.textContent = msg;
+  el.style.opacity = '1';
+  if (type === 'success') {
+    setTimeout(() => { if (el && el.classList.contains('success')) el.style.opacity = '0'; }, 4000);
+  }
+}
+
+function setWeekdays(days) {
+  document.querySelectorAll('input[name="weekday"]').forEach(input => {
+    const isChecked = days.includes(Number(input.value));
+    input.checked = isChecked;
+    const pill = input.closest('.weekday-pill');
+    if (pill) pill.classList.toggle('active', isChecked);
+  });
+}
+
+function updateSwitchLabel(checkbox, textId, onText, offText) {
+  const el = document.getElementById(textId);
+  if (el) el.textContent = checkbox.checked ? onText : offText;
+}
+
+const EYE_OPEN_SVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+const EYE_OFF_SVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+
+function toggleTelegramToken() {
+  const input = document.getElementById('telegramBotToken');
+  const button = document.getElementById('telegramTokenToggle');
+  const revealing = input.type === 'password';
+  input.type = revealing ? 'text' : 'password';
+  button.innerHTML = revealing ? EYE_OFF_SVG : EYE_OPEN_SVG;
+  button.setAttribute('aria-label', revealing ? '隐藏 Bot Token' : '显示 Bot Token');
+  button.title = revealing ? '隐藏 Bot Token' : '显示 Bot Token';
+}
+
 function renderSystemInfo(info) {
   const schedule = info.schedule;
   const scan = info.scan;
@@ -944,88 +1605,434 @@ function renderSystemInfo(info) {
   const runtime = info.runtime;
   const weekdayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
   const timeValue = `${String(schedule.hour).padStart(2, '0')}:${String(schedule.minute).padStart(2, '0')}`;
-  const nextNewYork = schedule.next_run && schedule.next_run.new_york ? new Date(schedule.next_run.new_york).toLocaleString('zh-CN', {timeZone: 'America/New_York', hour12: false}) : '已停用或暂无';
-  const nextBeijing = schedule.next_run && schedule.next_run.beijing ? new Date(schedule.next_run.beijing).toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai', hour12: false}) : '已停用或暂无';
+  const nextNewYork = schedule.next_run && schedule.next_run.new_york ? new Date(schedule.next_run.new_york).toLocaleString('zh-CN', {timeZone: 'America/New_York', hour12: false}) : '已暂停或暂无计划';
+  const nextBeijing = schedule.next_run && schedule.next_run.beijing ? new Date(schedule.next_run.beijing).toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai', hour12: false}) : '已暂停或暂无计划';
   const schedulerState = schedule.state || {};
-  const schedulerStatusNames = {running: '运行中', completed: '已完成', failed: '失败'};
+  const schedulerStatusNames = {running: '运行中', completed: '已完成', failed: '执行失败'};
+
+  const isTgReady = telegram.enabled && telegram.bot_token_configured && telegram.chat_id;
 
   document.getElementById('scheduleInfo').innerHTML = `
+    <!-- Top Row: Schedule Config & Next Run -->
     <div class="grid-2">
+      <!-- Schedule Config Card -->
       <div class="card">
-        <h2>定时任务配置</h2>
-        <div class="form-row"><label>启用自动扫描</label><div><input type="checkbox" id="scheduleEnabled" ${schedule.enabled ? 'checked' : ''}></div></div>
-        <div class="form-row"><label>执行时区</label><div><input class="form-control" value="America/New_York（美东时间）" disabled></div></div>
-        <div class="form-row"><label>美东执行时间</label><div><input class="form-control" type="time" id="scheduleTime" value="${timeValue}"></div></div>
-        <div class="form-row"><label>执行星期</label><div class="weekday-list">${weekdayNames.map((name, index) => `<label class="weekday-item"><input type="checkbox" name="weekday" value="${index}" ${schedule.weekdays.includes(index) ? 'checked' : ''}>${name}</label>`).join('')}</div></div>
-        <button class="btn primary" onclick="saveSchedule()">保存定时任务</button>
-        <span id="scheduleSaveStatus" style="margin-left:10px;color:var(--muted);font-size:12px"></span>
-      </div>
-      <div class="card">
-        <h2>下次运行时间</h2>
-        <div class="next-run">
-          <div>纽约时间：<strong>${nextNewYork}</strong></div>
-          <div>北京时间：<strong>${nextBeijing}</strong></div>
-          <div>上次定时任务：<strong>${schedulerStatusNames[schedulerState.status] || '暂无记录'}</strong></div>
+        <div class="card-header">
+          <div class="card-header-left">
+            <div class="card-icon-badge">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div class="card-title-group">
+              <h2>定时任务配置</h2>
+              <p>自动化收盘后全市场筛选与阶段研判计划</p>
+            </div>
+          </div>
+          <span class="badge ${schedule.enabled ? 'green' : 'yellow'}">${schedule.enabled ? '自动扫描生效中' : '自动扫描已暂停'}</span>
         </div>
-        <div class="notice" style="margin-top:16px">服务器和调度器始终以美东时区计算。页面同时换算北京时间，并自动处理美国夏令时与冬令时，无需手工调整时差。</div>
-        <div class="code-block">${schedule.command}</div>
+
+        <div class="config-form">
+          <div class="form-row">
+            <div class="form-label">
+              任务开关
+              <span class="form-label-desc">定时自动化执行</span>
+            </div>
+            <div>
+              <label class="switch-control">
+                <input type="checkbox" id="scheduleEnabled" ${schedule.enabled ? 'checked' : ''} onchange="updateSwitchLabel(this, 'scheduleEnabledText', '定时任务已启用', '定时任务已暂停')">
+                <span class="switch-slider"></span>
+                <span class="switch-text" id="scheduleEnabledText">${schedule.enabled ? '定时任务已启用' : '定时任务已暂停'}</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-label">
+              基准时区
+              <span class="form-label-desc">美股数据归档地</span>
+            </div>
+            <div>
+              <div class="form-control-static">
+                <span>🇺🇸</span>
+                <strong>America/New_York</strong>
+                <span style="color:var(--muted);font-size:12px">（美东时间，以收盘数据为准）</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-label">
+              美东执行时间
+              <span class="form-label-desc">盘后触发时点</span>
+            </div>
+            <div>
+              <div class="time-picker-wrap">
+                <input class="form-control time-input" type="time" id="scheduleTime" value="${timeValue}">
+                <span class="input-tag">盘后推荐 18:00–19:00</span>
+              </div>
+              <div class="field-hint">美股于美东 16:00 收盘，建议设置在 18:15 之后以等待上游复权与财报结算完毕。</div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-label">
+              执行星期
+              <span class="form-label-desc">交易日循环</span>
+            </div>
+            <div>
+              <div class="weekday-pills">
+                ${weekdayNames.map((name, index) => `
+                  <label class="weekday-pill ${schedule.weekdays.includes(index) ? 'active' : ''}">
+                    <input type="checkbox" name="weekday" value="${index}" ${schedule.weekdays.includes(index) ? 'checked' : ''} onchange="this.parentElement.classList.toggle('active', this.checked)">
+                    <span>${name}</span>
+                  </label>
+                `).join('')}
+              </div>
+              <div class="weekday-quick">
+                <button type="button" class="btn-xs" onclick="setWeekdays([0,1,2,3,4])">常用：工作日（周一至周五）</button>
+                <button type="button" class="btn-xs" onclick="setWeekdays([0,1,2,3,4,5,6])">全选（每天）</button>
+                <button type="button" class="btn-xs" onclick="setWeekdays([])">清空</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-footer">
+          <button class="btn primary" onclick="saveSchedule()">保存定时任务</button>
+          <span id="scheduleSaveStatus" class="status-msg"></span>
+        </div>
+      </div>
+
+      <!-- Next Run Status Card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-header-left">
+            <div class="card-icon-badge purple">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            </div>
+            <div class="card-title-group">
+              <h2>下次运行与调度看板</h2>
+              <p>双时区联动与调度器常驻状态</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="status-banner">
+          <div class="status-item">
+            <span class="pulse-dot ${schedulerState.status === 'running' ? 'yellow' : schedulerState.status === 'failed' ? 'red' : 'green'}"></span>
+            <span>调度服务状态：<strong>${schedulerStatusNames[schedulerState.status] || (schedule.enabled ? '正常就绪中' : '定时已暂停')}</strong></span>
+          </div>
+          <span class="status-sub">${schedulerState.last_run ? '上次：' + schedulerState.last_run : '无缝守护中'}</span>
+        </div>
+
+        <div class="dual-clocks">
+          <div class="clock-card">
+            <div class="clock-label">
+              <span>🇺🇸 美东时间 (New York)</span>
+              <span class="badge blue">美东基准</span>
+            </div>
+            <div class="clock-value font-mono">${nextNewYork}</div>
+            <div class="clock-desc">服务器以美东为准，夏冬令时全自动换算</div>
+          </div>
+
+          <div class="clock-card highlight">
+            <div class="clock-label">
+              <span>🇨🇳 北京时间 (Beijing)</span>
+              <span class="badge green">对应本地</span>
+            </div>
+            <div class="clock-value font-mono">${nextBeijing}</div>
+            <div class="clock-desc">${schedule.beijing_time || '夏令时次日 06:15 ；冬令时次日 07:15'}</div>
+          </div>
+        </div>
+
+        <div class="notice" style="margin-top:2px;font-size:12px;line-height:1.6">
+          <strong>时差说明：</strong>无论美国切换冬令时还是夏令时，定时任务始终精准锁定在美股收盘后的同一美东时刻，无需手动重新计算时差。
+        </div>
+
+        <div class="terminal-card">
+          <div class="terminal-header">
+            <div class="terminal-dots"><span></span><span></span><span></span></div>
+            <span class="terminal-label">cron background execution runner</span>
+          </div>
+          <div class="terminal-body font-mono">${schedule.command}</div>
+        </div>
       </div>
     </div>
-    <div class="grid-2" style="margin-top:16px">
+
+    <!-- Middle Row: Telegram Config & Push Tips -->
+    <div class="grid-2">
+      <!-- Telegram Config Card -->
       <div class="card">
-        <h2>Telegram 推送配置</h2>
-        <div class="form-row"><label>启用 TG 推送</label><div><input type="checkbox" id="telegramEnabled" ${telegram.enabled ? 'checked' : ''}></div></div>
-        <div class="form-row"><label>Bot Token</label><div><div class="secret-input-wrap"><input class="form-control" id="telegramBotToken" type="password" autocomplete="new-password" value="${escapeHtml(telegram.bot_token || '')}" placeholder="请输入 BotFather Token"><button class="secret-toggle" id="telegramTokenToggle" type="button" onclick="toggleTelegramToken()" aria-label="显示 Bot Token" title="显示 Bot Token">👁</button></div><div class="sub" style="margin-top:5px">默认隐藏；点击小眼睛显示或再次隐藏。</div></div></div>
-        <div class="form-row"><label>Chat ID</label><div><input class="form-control" id="telegramChatId" type="text" value="${escapeHtml(telegram.chat_id)}" placeholder="例如 -1001234567890"></div></div>
-        <div class="form-row"><label>正式/定时扫描</label><div><input type="checkbox" id="telegramNotifyFull" ${telegram.notify_full ? 'checked' : ''}> 完成后推送 Top N 结果</div></div>
-        <div class="form-row"><label>测试扫描</label><div><input type="checkbox" id="telegramNotifyTest" ${telegram.notify_test ? 'checked' : ''}> 完成后也推送</div></div>
-        <button class="btn primary" onclick="saveTelegramSettings(false)">保存 TG 配置</button>
-        <button class="btn" onclick="saveTelegramSettings(true)">保存并测试</button>
-        <span id="telegramSaveStatus" style="margin-left:10px;color:var(--muted);font-size:12px"></span>
+        <div class="card-header">
+          <div class="card-header-left">
+            <div class="card-icon-badge" style="background:rgba(14,165,233,0.12);color:#38bdf8;border-color:rgba(14,165,233,0.25)">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </div>
+            <div class="card-title-group">
+              <h2>Telegram 推送配置</h2>
+              <p>扫描完成即刻推送突破选股信号到 Telegram</p>
+            </div>
+          </div>
+          <span class="badge ${isTgReady ? 'green' : 'yellow'}">${isTgReady ? '已就绪' : '待完善'}</span>
+        </div>
+
+        <div class="config-form">
+          <div class="form-row">
+            <div class="form-label">
+              推送总开关
+              <span class="form-label-desc">TG 机器人总控</span>
+            </div>
+            <div>
+              <label class="switch-control">
+                <input type="checkbox" id="telegramEnabled" ${telegram.enabled ? 'checked' : ''} onchange="updateSwitchLabel(this, 'telegramEnabledText', 'TG 推送已开启', 'TG 推送已暂停')">
+                <span class="switch-slider"></span>
+                <span class="switch-text" id="telegramEnabledText">${telegram.enabled ? 'TG 推送已开启' : 'TG 推送已暂停'}</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-label">
+              Bot Token
+              <span class="form-label-desc">机器人访问密钥</span>
+            </div>
+            <div>
+              <div class="secret-input-wrap">
+                <input class="form-control" id="telegramBotToken" type="password" autocomplete="new-password" value="${escapeHtml(telegram.bot_token || '')}" placeholder="格式如 123456789:ABCdef...">
+                <button class="secret-toggle" id="telegramTokenToggle" type="button" onclick="toggleTelegramToken()" aria-label="显示 Bot Token" title="显示 Bot Token">
+                  ${EYE_OPEN_SVG}
+                </button>
+              </div>
+              <div class="field-hint">从 Telegram <a href="https://t.me/BotFather" target="_blank" rel="noopener" style="color:#60a5fa;text-decoration:none">@BotFather</a> 创建获取；前端已进行安全加密隐藏。</div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-label">
+              Chat ID
+              <span class="form-label-desc">接收目标会话</span>
+            </div>
+            <div>
+              <div class="input-with-prefix">
+                <span class="input-prefix">#</span>
+                <input class="form-control" id="telegramChatId" type="text" value="${escapeHtml(telegram.chat_id)}" placeholder="例如 123456789 或群组 -1001234567890">
+              </div>
+              <div class="field-hint">接收通知的个人 Chat ID 或群组 ID（群组通常以 <code>-100</code> 开头）。</div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-label">
+              通知触发场景
+              <span class="form-label-desc">细分触发时机</span>
+            </div>
+            <div>
+              <div class="event-cards-group">
+                <label class="event-card">
+                  <input type="checkbox" id="telegramNotifyFull" ${telegram.notify_full ? 'checked' : ''}>
+                  <div class="event-info">
+                    <div class="event-title">正式扫描 / 每日定时任务推送</div>
+                    <div class="event-desc">每晚收盘全量扫描完成后，推送市场环境、SPY 阶段与 Top N 突破买入/卖出信号。</div>
+                  </div>
+                </label>
+                <label class="event-card">
+                  <input type="checkbox" id="telegramNotifyTest" ${telegram.notify_test ? 'checked' : ''}>
+                  <div class="event-info">
+                    <div class="event-title">测试扫描推送（100 只样本）</div>
+                    <div class="event-desc">手动启动 100 只样本测试扫描时也推送消息（调试时使用，默认建议关闭）。</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-footer">
+          <button class="btn primary" onclick="saveTelegramSettings(false)">保存 TG 配置</button>
+          <button class="btn secondary" onclick="saveTelegramSettings(true)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:2px"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            保存并测试发送
+          </button>
+          <span id="telegramSaveStatus" class="status-msg"></span>
+        </div>
       </div>
+
+      <!-- Telegram Notes Card -->
       <div class="card">
-        <h2>推送说明</h2>
-        <ul class="info-list">
-          <li>正式 Full Scan 和定时扫描共用“正式/定时扫描”开关。</li>
-          <li>测试扫描默认不推送，可在左侧单独开启。</li>
-          <li>fin_twt 内部接口任务强制不推送，不受这里的配置影响。</li>
-          <li>配置保存在 <code>data/config/telegram.json</code>，保存后无需重启。</li>
-          <li>旧 <code>.env</code> 配置会作为首次默认值，保存后迁移到配置文件。</li>
+        <div class="card-header">
+          <div class="card-header-left">
+            <div class="card-icon-badge green">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            </div>
+            <div class="card-title-group">
+              <h2>推送说明与最佳实践</h2>
+              <p>运行逻辑与参数配置规范</p>
+            </div>
+          </div>
+        </div>
+
+        <ul class="feature-notes">
+          <li class="feature-note-item">
+            <span class="feature-note-icon">📢</span>
+            <div>
+              <strong>全量与定时任务统一</strong>：正式全量扫描和收盘后的定时扫描均共用“正式/定时扫描”开关与同一份优质突破榜单模板。
+            </div>
+          </li>
+          <li class="feature-note-item">
+            <span class="feature-note-icon">🛡️</span>
+            <div>
+              <strong>测试扫描防骚扰</strong>：测试扫描（100只）默认不推送 Telegram，避免调试时频繁打扰频道成员。
+            </div>
+          </li>
+          <li class="feature-note-item">
+            <span class="feature-note-icon">⚡</span>
+            <div>
+              <strong>持久化动态热生效</strong>：配置保存在 <code>data/config/telegram.json</code>，保存后无需重启服务容器即可立即生效。
+            </div>
+          </li>
+          <li class="feature-note-item">
+            <span class="feature-note-icon">🔒</span>
+            <div>
+              <strong>敏感凭据加密保护</strong>：Bot Token 仅限在当前登录会话内读取，未授权请求严禁访问，离手后可再次点击眼睛隐藏。
+            </div>
+          </li>
+          <li class="feature-note-item">
+            <span class="feature-note-icon">🤖</span>
+            <div>
+              <strong>内部 API 静音执行</strong>：外部或自动化集成调用任务受统一策略保护，默认不向 TG 推送多余噪音。
+            </div>
+          </li>
         </ul>
-        <div class="notice" style="margin-top:16px">Bot Token 属于敏感凭据，仅登录后的配置页面可以读取。使用完显示功能后建议再次点击小眼睛隐藏。</div>
-      </div>
-    </div>
-    <div class="grid-2" style="margin-top:16px">
-      <div class="card">
-        <h2>扫描配置</h2>
-        <div class="form-row"><label>股票池</label><div><select class="form-control" id="universeMode">${scan.universe_options.map(option => `<option value="${option.value}" ${option.value === scan.universe_mode ? 'selected' : ''}>${option.label}</option>`).join('')}</select></div></div>
-        <div class="form-row"><label>每类展示数量</label><div><input class="form-control" id="resultLimit" type="number" min="5" max="100" step="1" value="${scan.result_limit}"><div class="sub" style="margin-top:5px">Dashboard 和 Telegram 仅展示 Top N，完整排序保存在 JSON 审计报告中。</div></div></div>
-        <button class="btn primary" onclick="saveScanSettings()">保存扫描配置</button>
-        <span id="scanSettingsSaveStatus" style="margin-left:10px;color:var(--muted);font-size:12px"></span>
-      </div>
-      <div class="card">
-        <h2>行情缓存</h2>
-        <div class="next-run">
-          <div>增量缓存：<strong>${scan.price_cache_enabled ? '已启用' : '已停用'}</strong></div>
-          <div>完整历史校验：<strong>每 ${scan.price_cache_full_refresh_days} 天</strong></div>
-          <div>缓存范围：<strong>滚动五年日线</strong></div>
+
+        <div class="notice" style="margin-top:auto;font-size:12px;line-height:1.6">
+          <strong>测试提示：</strong>点击「保存并测试发送」后，系统会立即向填写的 Chat ID 发送一条联通性测试消息，若遇到报错请检查 Bot 是否已加入群组或私聊中点击了 Start。
         </div>
-        <div class="notice" style="margin-top:16px">首次扫描下载五年历史；日常扫描只补最近交易日并合并去重。发生拆股时立即重建完整历史，定期完整校验可修复复权和上游数据调整。</div>
       </div>
     </div>
-    <div class="card" style="margin-top:16px">
-      <h2>扫描运行方式</h2>
-      <ul class="info-list">
-        <li><strong>股票池：</strong>${runtime.universe_size}</li>
-        <li><strong>测试扫描：</strong>${runtime.test_size} 只</li>
-        <li><strong>全量耗时：</strong>${runtime.full_scan_time}</li>
-        <li><strong>并发：</strong>${runtime.workers} 个工作线程，但价格请求受全局限速控制</li>
-        <li><strong>请求节奏：</strong>${runtime.request_delay}</li>
-        <li><strong>价格数据：</strong>${runtime.price_refresh}</li>
-        <li><strong>基本面缓存：</strong>${runtime.fundamental_cache}</li>
-        <li><strong>Telegram：</strong>${runtime.telegram}</li>
-        <li><strong>防止重叠：</strong>${schedule.overlap_protection}</li>
-      </ul>
+
+    <!-- Bottom Row: Scan Settings & Price Cache -->
+    <div class="grid-2">
+      <!-- Scan Config Card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-header-left">
+            <div class="card-icon-badge">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+            </div>
+            <div class="card-title-group">
+              <h2>股票池与输出设置</h2>
+              <p>全局扫描范围与筛选呈现上限</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-form">
+          <div class="form-row">
+            <div class="form-label">
+              股票池范围
+              <span class="form-label-desc">初筛标的范围</span>
+            </div>
+            <div>
+              <select class="form-control" id="universeMode">
+                ${scan.universe_options.map(option => `<option value="${option.value}" ${option.value === scan.universe_mode ? 'selected' : ''}>${option.label}</option>`).join('')}
+              </select>
+              <div class="field-hint">默认标普 500 + 纳斯达克 100；全量选股耗时适中且流动性与突破质量极佳。</div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-label">
+              每类展示数量
+              <span class="form-label-desc">榜单截取上限</span>
+            </div>
+            <div>
+              <input class="form-control" id="resultLimit" type="number" min="5" max="100" step="1" value="${scan.result_limit}">
+              <div class="field-hint">Dashboard 与 Telegram 仅展示 Top N 精选信号（5–100），完整排序沉淀于后台审计 JSON。</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-footer">
+          <button class="btn primary" onclick="saveScanSettings()">保存扫描配置</button>
+          <span id="scanSettingsSaveStatus" class="status-msg"></span>
+        </div>
+      </div>
+
+      <!-- Price Cache Card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-header-left">
+            <div class="card-icon-badge green">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            </div>
+            <div class="card-title-group">
+              <h2>行情与数据缓存</h2>
+              <p>增量同步与滚动五年日线机制</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="dual-clocks">
+          <div class="clock-card">
+            <div class="clock-label">
+              <span>增量缓存模式</span>
+              <span class="badge ${scan.price_cache_enabled ? 'green' : 'red'}">${scan.price_cache_enabled ? '已启用' : '已停用'}</span>
+            </div>
+            <div class="clock-value font-mono">滚动五年日线</div>
+            <div class="clock-desc">初次建仓拉取完整数据，日常只补单日增量</div>
+          </div>
+
+          <div class="clock-card">
+            <div class="clock-label">
+              <span>完整校准周期</span>
+              <span class="badge blue">自动校验</span>
+            </div>
+            <div class="clock-value font-mono">每 ${scan.price_cache_full_refresh_days} 天</div>
+            <div class="clock-desc">自动检测拆股与分红复权，修补异常间断</div>
+          </div>
+        </div>
+
+        <div class="notice" style="margin-top:auto;font-size:12px;line-height:1.6">
+          <strong>缓存保护机制：</strong>首次扫描建立五年数据用于回撤过滤，日常只需增量补最新交易日（耗时显著降低）。切换股票池不会清除已有的历史缓存。
+        </div>
+      </div>
+    </div>
+
+    <!-- System Specs Card -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-header-left">
+          <div class="card-icon-badge purple">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+          </div>
+          <div class="card-title-group">
+            <h2>扫描引擎运行规范</h2>
+            <p>并发控制与频率限制底层状态</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="info-grid">
+        <div class="clock-card">
+          <div class="clock-label">股票池覆盖</div>
+          <div class="clock-value" style="font-size:13px">${runtime.universe_size}</div>
+          <div class="clock-desc">测试样本：${runtime.test_size} 只</div>
+        </div>
+        <div class="clock-card">
+          <div class="clock-label">全量预估耗时</div>
+          <div class="clock-value" style="font-size:13px">${runtime.full_scan_time}</div>
+          <div class="clock-desc">受全局请求延时保护</div>
+        </div>
+        <div class="clock-card">
+          <div class="clock-label">并发调度控制</div>
+          <div class="clock-value font-mono" style="font-size:13px">${runtime.workers} 工作线程</div>
+          <div class="clock-desc">请求节奏：${runtime.request_delay}</div>
+        </div>
+        <div class="clock-card">
+          <div class="clock-label">基本面缓存</div>
+          <div class="clock-value" style="font-size:13px">${runtime.fundamental_cache}</div>
+          <div class="clock-desc">排重锁：${schedule.overlap_protection}</div>
+        </div>
+      </div>
     </div>`;
 
   document.getElementById('rulesInfo').innerHTML = `
@@ -1069,12 +2076,12 @@ function showTab(tabId, button) {
 async function saveSchedule() {
   const weekdays = Array.from(document.querySelectorAll('input[name="weekday"]:checked')).map(input => Number(input.value));
   const [hour, minute] = document.getElementById('scheduleTime').value.split(':').map(Number);
-  const status = document.getElementById('scheduleSaveStatus');
+  const statusEl = document.getElementById('scheduleSaveStatus');
   if (weekdays.length === 0) {
-    status.textContent = '请至少选择一个执行日';
+    setSaveStatus(statusEl, 'error', '请至少选择一个有效执行日');
     return;
   }
-  status.textContent = '正在保存...';
+  setSaveStatus(statusEl, 'loading', '正在保存定时任务配置...');
   try {
     const response = await fetch('api/schedule', {
       method: 'PUT',
@@ -1085,25 +2092,15 @@ async function saveSchedule() {
     if (!response.ok) throw new Error(result.error || '保存失败');
     systemInfoData = result;
     renderSystemInfo(result);
-    document.getElementById('scheduleSaveStatus').textContent = '保存成功';
+    setSaveStatus(document.getElementById('scheduleSaveStatus'), 'success', '定时任务已更新');
     showToast('定时任务配置已更新，无需重启容器。');
   } catch (error) {
-    status.textContent = error.message;
+    setSaveStatus(document.getElementById('scheduleSaveStatus'), 'error', error.message);
   }
 }
 
-function toggleTelegramToken() {
-  const input = document.getElementById('telegramBotToken');
-  const button = document.getElementById('telegramTokenToggle');
-  const revealing = input.type === 'password';
-  input.type = revealing ? 'text' : 'password';
-  button.textContent = revealing ? '🙈' : '👁';
-  button.setAttribute('aria-label', revealing ? '隐藏 Bot Token' : '显示 Bot Token');
-  button.title = revealing ? '隐藏 Bot Token' : '显示 Bot Token';
-}
-
 async function saveTelegramSettings(sendTest) {
-  const status = document.getElementById('telegramSaveStatus');
+  const statusEl = document.getElementById('telegramSaveStatus');
   const payload = {
     enabled: document.getElementById('telegramEnabled').checked,
     bot_token: document.getElementById('telegramBotToken').value,
@@ -1111,7 +2108,7 @@ async function saveTelegramSettings(sendTest) {
     notify_full: document.getElementById('telegramNotifyFull').checked,
     notify_test: document.getElementById('telegramNotifyTest').checked
   };
-  status.textContent = sendTest ? '正在保存并发送测试消息...' : '正在保存...';
+  setSaveStatus(statusEl, 'loading', sendTest ? '正在保存并发送测试推送...' : '正在保存配置...');
   try {
     const response = await fetch('api/telegram-settings', {
       method: 'PUT',
@@ -1129,26 +2126,26 @@ async function saveTelegramSettings(sendTest) {
       });
       const testResult = await testResponse.json();
       if (!testResponse.ok) throw new Error(testResult.error || '测试消息发送失败');
-      document.getElementById('telegramSaveStatus').textContent = '保存成功，测试消息已发送';
-      showToast('Telegram 配置已保存，测试消息发送成功。');
+      setSaveStatus(document.getElementById('telegramSaveStatus'), 'success', '配置已保存，测试消息送达成功');
+      showToast('Telegram 配置已保存，测试消息已送达！');
     } else {
-      document.getElementById('telegramSaveStatus').textContent = '保存成功';
+      setSaveStatus(document.getElementById('telegramSaveStatus'), 'success', 'TG 推送配置已更新');
       showToast('Telegram 推送配置已更新，无需重启容器。');
     }
   } catch (error) {
     const currentStatus = document.getElementById('telegramSaveStatus');
-    if (currentStatus) currentStatus.textContent = error.message;
+    if (currentStatus) setSaveStatus(currentStatus, 'error', error.message);
   }
 }
 
 async function saveScanSettings() {
-  const status = document.getElementById('scanSettingsSaveStatus');
+  const statusEl = document.getElementById('scanSettingsSaveStatus');
   const resultLimit = Number(document.getElementById('resultLimit').value);
   if (!Number.isInteger(resultLimit) || resultLimit < 5 || resultLimit > 100) {
-    status.textContent = '展示数量必须在 5–100 之间';
+    setSaveStatus(statusEl, 'error', '展示数量必须在 5–100 之间');
     return;
   }
-  status.textContent = '正在保存...';
+  setSaveStatus(statusEl, 'loading', '正在保存扫描配置...');
   try {
     const response = await fetch('api/scan-settings', {
       method: 'PUT',
@@ -1164,10 +2161,10 @@ async function saveScanSettings() {
     if (!response.ok) throw new Error(result.error || '保存失败');
     systemInfoData = result;
     renderSystemInfo(result);
-    document.getElementById('scanSettingsSaveStatus').textContent = '保存成功';
-    showToast('扫描配置已更新，将从下一次扫描开始生效。');
+    setSaveStatus(document.getElementById('scanSettingsSaveStatus'), 'success', '扫描配置已更新');
+    showToast('扫描配置已更新，将从下一次扫描生效。');
   } catch (error) {
-    status.textContent = error.message;
+    setSaveStatus(document.getElementById('scanSettingsSaveStatus'), 'error', error.message);
   }
 }
 
