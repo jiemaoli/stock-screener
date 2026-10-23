@@ -33,6 +33,11 @@ from src.config.scan_settings import (
     read_scan_settings,
     write_scan_settings,
 )
+from src.config.telegram_settings import (
+    public_telegram_settings,
+    read_telegram_settings,
+    write_telegram_settings,
+)
 from src.integrations.screener_api import completed_envelope, failed_envelope, running_envelope
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
@@ -160,6 +165,17 @@ def _build_system_info():
             for value, label in UNIVERSE_MODES.items()
         ],
     }
+    telegram = public_telegram_settings()
+    info["telegram"] = telegram
+    if telegram["enabled"] and telegram["bot_token_configured"] and telegram["chat_id"]:
+        enabled_types = []
+        if telegram["notify_full"]:
+            enabled_types.append("正式/定时扫描")
+        if telegram["notify_test"]:
+            enabled_types.append("测试扫描")
+        info["runtime"]["telegram"] = "已启用：" + "、".join(enabled_types)
+    else:
+        info["runtime"]["telegram"] = "未启用或配置不完整"
     info["runtime"]["universe_size"] = info["scan"]["universe_label"]
     info["filters"][0]["value"] = info["scan"]["universe_label"]
     return info
@@ -782,7 +798,7 @@ DASHBOARD_HTML = """
 <div class="container" id="content">
   <div class="tab-nav">
     <button class="tab-btn active" data-tab="dashboardTab" onclick="showTab('dashboardTab', this)">扫描结果</button>
-    <button class="tab-btn" data-tab="scheduleTab" onclick="showTab('scheduleTab', this)">定时任务</button>
+    <button class="tab-btn" data-tab="scheduleTab" onclick="showTab('scheduleTab', this)">定时任务与 TG 推送</button>
     <button class="tab-btn" data-tab="rulesTab" onclick="showTab('rulesTab', this)">选股规则</button>
   </div>
 
@@ -869,6 +885,10 @@ const trendNames = {Bullish: '上涨', Bearish: '下跌', Consolidating: '盘整
 const entryNames = {Good: '良好', Extended: '偏离', Poor: '较差'};
 const severityNames = {critical: '严重', high: '高', medium: '中等', low: '低'};
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+}
+
 function regimeName(value) {
   if ((value || '').includes('RISK-ON (Strong)')) return '风险偏好（强）';
   if ((value || '').includes('RISK-ON (Moderate)')) return '风险偏好（中等）';
@@ -914,6 +934,7 @@ function rows(items, points = false) {
 function renderSystemInfo(info) {
   const schedule = info.schedule;
   const scan = info.scan;
+  const telegram = info.telegram;
   const runtime = info.runtime;
   const weekdayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
   const timeValue = `${String(schedule.hour).padStart(2, '0')}:${String(schedule.minute).padStart(2, '0')}`;
@@ -942,6 +963,30 @@ function renderSystemInfo(info) {
         </div>
         <div class="notice" style="margin-top:16px">服务器和调度器始终以美东时区计算。页面同时换算北京时间，并自动处理美国夏令时与冬令时，无需手工调整时差。</div>
         <div class="code-block">${schedule.command}</div>
+      </div>
+    </div>
+    <div class="grid-2" style="margin-top:16px">
+      <div class="card">
+        <h2>Telegram 推送配置</h2>
+        <div class="form-row"><label>启用 TG 推送</label><div><input type="checkbox" id="telegramEnabled" ${telegram.enabled ? 'checked' : ''}></div></div>
+        <div class="form-row"><label>Bot Token</label><div><input class="form-control" id="telegramBotToken" type="password" autocomplete="new-password" placeholder="${telegram.bot_token_configured ? '已配置，留空保持不变' : '请输入 BotFather Token'}"><div class="sub" style="margin-top:5px">Token 不会回显到页面或接口。</div></div></div>
+        <div class="form-row"><label>Chat ID</label><div><input class="form-control" id="telegramChatId" type="text" value="${escapeHtml(telegram.chat_id)}" placeholder="例如 -1001234567890"></div></div>
+        <div class="form-row"><label>正式/定时扫描</label><div><input type="checkbox" id="telegramNotifyFull" ${telegram.notify_full ? 'checked' : ''}> 完成后推送 Top N 结果</div></div>
+        <div class="form-row"><label>测试扫描</label><div><input type="checkbox" id="telegramNotifyTest" ${telegram.notify_test ? 'checked' : ''}> 完成后也推送</div></div>
+        <button class="btn primary" onclick="saveTelegramSettings(false)">保存 TG 配置</button>
+        <button class="btn" onclick="saveTelegramSettings(true)">保存并测试</button>
+        <span id="telegramSaveStatus" style="margin-left:10px;color:var(--muted);font-size:12px"></span>
+      </div>
+      <div class="card">
+        <h2>推送说明</h2>
+        <ul class="info-list">
+          <li>正式 Full Scan 和定时扫描共用“正式/定时扫描”开关。</li>
+          <li>测试扫描默认不推送，可在左侧单独开启。</li>
+          <li>fin_twt 内部接口任务强制不推送，不受这里的配置影响。</li>
+          <li>配置保存在 <code>data/config/telegram.json</code>，保存后无需重启。</li>
+          <li>旧 <code>.env</code> 配置会作为首次默认值，保存后迁移到配置文件。</li>
+        </ul>
+        <div class="notice" style="margin-top:16px">Bot Token 属于敏感凭据。页面只显示是否已配置，不会返回 Token 原文；留空保存表示继续使用现有 Token。</div>
       </div>
     </div>
     <div class="grid-2" style="margin-top:16px">
@@ -1038,6 +1083,45 @@ async function saveSchedule() {
     showToast('定时任务配置已更新，无需重启容器。');
   } catch (error) {
     status.textContent = error.message;
+  }
+}
+
+async function saveTelegramSettings(sendTest) {
+  const status = document.getElementById('telegramSaveStatus');
+  const payload = {
+    enabled: document.getElementById('telegramEnabled').checked,
+    bot_token: document.getElementById('telegramBotToken').value,
+    chat_id: document.getElementById('telegramChatId').value.trim(),
+    notify_full: document.getElementById('telegramNotifyFull').checked,
+    notify_test: document.getElementById('telegramNotifyTest').checked
+  };
+  status.textContent = sendTest ? '正在保存并发送测试消息...' : '正在保存...';
+  try {
+    const response = await fetch('api/telegram-settings', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || '保存失败');
+    systemInfoData = result;
+    renderSystemInfo(result);
+    if (sendTest) {
+      const testResponse = await fetch('api/telegram-settings/test', {
+        method: 'POST',
+        headers: {'X-CSRF-Token': csrfToken}
+      });
+      const testResult = await testResponse.json();
+      if (!testResponse.ok) throw new Error(testResult.error || '测试消息发送失败');
+      document.getElementById('telegramSaveStatus').textContent = '保存成功，测试消息已发送';
+      showToast('Telegram 配置已保存，测试消息发送成功。');
+    } else {
+      document.getElementById('telegramSaveStatus').textContent = '保存成功';
+      showToast('Telegram 推送配置已更新，无需重启容器。');
+    }
+  } catch (error) {
+    const currentStatus = document.getElementById('telegramSaveStatus');
+    if (currentStatus) currentStatus.textContent = error.message;
   }
 }
 
@@ -1480,6 +1564,43 @@ def api_schedule():
     }
     _write_schedule_config(config)
     return jsonify(_build_system_info())
+
+
+@app.route("/api/telegram-settings", methods=["PUT"])
+def api_telegram_settings():
+    if not secrets.compare_digest(request.headers.get("X-CSRF-Token", ""), session.get("csrf_token", "")):
+        return jsonify({"error": "CSRF 校验失败"}), 400
+
+    body = request.get_json(silent=True) or {}
+    settings = read_telegram_settings()
+    settings.update(
+        {
+            "enabled": body.get("enabled") is True,
+            "chat_id": body.get("chat_id", ""),
+            "notify_full": body.get("notify_full") is True,
+            "notify_test": body.get("notify_test") is True,
+        }
+    )
+    new_token = str(body.get("bot_token", "")).strip()
+    if new_token:
+        settings["bot_token"] = new_token
+
+    try:
+        write_telegram_settings(settings)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(_build_system_info())
+
+
+@app.route("/api/telegram-settings/test", methods=["POST"])
+def api_telegram_settings_test():
+    if not secrets.compare_digest(request.headers.get("X-CSRF-Token", ""), session.get("csrf_token", "")):
+        return jsonify({"error": "CSRF 校验失败"}), 400
+    from src.notifications.telegram_notifier import TelegramNotifier
+
+    if not TelegramNotifier().send_test_message():
+        return jsonify({"error": "测试消息发送失败，请检查 Bot Token、Chat ID 和机器人权限"}), 502
+    return jsonify({"success": True})
 
 
 @app.route("/api/scan-settings", methods=["PUT"])

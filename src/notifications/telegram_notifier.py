@@ -2,13 +2,12 @@
 
 import html
 import logging
-import os
 from pathlib import Path
 from typing import Dict, List
 
 import requests
-from dotenv import load_dotenv
 
+from src.config.telegram_settings import read_telegram_settings
 from src.screening.benchmark import classify_market_regime
 
 logger = logging.getLogger(__name__)
@@ -18,14 +17,16 @@ class TelegramNotifier:
     """Send concise buy/sell ticker summaries through a Telegram bot."""
 
     def __init__(self):
-        load_dotenv()
-        self.bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-        self.chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-        self.notify_test = os.getenv("TELEGRAM_NOTIFY_TEST", "false").lower() == "true"
+        settings = read_telegram_settings()
+        self.enabled = settings["enabled"]
+        self.bot_token = settings["bot_token"]
+        self.chat_id = settings["chat_id"]
+        self.notify_full = settings["notify_full"]
+        self.notify_test = settings["notify_test"]
 
     @property
     def configured(self) -> bool:
-        return bool(self.bot_token and self.chat_id)
+        return bool(self.enabled and self.bot_token and self.chat_id)
 
     def _send_message(self, text: str) -> bool:
         response = requests.post(
@@ -40,6 +41,18 @@ class TelegramNotifier:
         )
         response.raise_for_status()
         return True
+
+    def send_test_message(self) -> bool:
+        if not self.configured:
+            logger.info("Telegram test skipped: notification is disabled or incomplete")
+            return False
+        try:
+            return self._send_message(
+                "<b>强势突破股票筛选器</b>\nTelegram 推送配置测试成功。"
+            )
+        except requests.RequestException as exc:
+            logger.error("Telegram test notification failed: %s", exc)
+            return False
 
     @staticmethod
     def _ticker_lines(label: str, signals: List[Dict]) -> List[str]:
@@ -77,6 +90,9 @@ class TelegramNotifier:
             return False
         if is_test and not self.notify_test:
             logger.info("Telegram notification skipped for test scan")
+            return False
+        if not is_test and not self.notify_full:
+            logger.info("Telegram notification skipped for full scan")
             return False
 
         regime = html.escape(classify_market_regime(spy_analysis, breadth))
