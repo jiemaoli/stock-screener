@@ -165,7 +165,9 @@ def _build_system_info():
             for value, label in UNIVERSE_MODES.items()
         ],
     }
-    telegram = public_telegram_settings()
+    # /api/system-info requires an authenticated Dashboard session. Include the
+    # token so the password field can be revealed on explicit user request.
+    telegram = public_telegram_settings(include_token=True)
     info["telegram"] = telegram
     if telegram["enabled"] and telegram["bot_token_configured"] and telegram["chat_id"]:
         enabled_types = []
@@ -763,6 +765,10 @@ DASHBOARD_HTML = """
   .form-row { display: grid; grid-template-columns: 160px 1fr; gap: 16px; align-items: center; margin-bottom: 16px; }
   .form-row label { font-size: 13px; color: var(--muted); }
   .form-control { width: 100%; max-width: 360px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 9px 10px; }
+  .secret-input-wrap { display: flex; width: 100%; max-width: 360px; }
+  .secret-input-wrap .form-control { max-width: none; border-radius: 6px 0 0 6px; }
+  .secret-toggle { width: 42px; border: 1px solid var(--border); border-left: 0; border-radius: 0 6px 6px 0; background: var(--bg); color: var(--muted); cursor: pointer; font-size: 16px; }
+  .secret-toggle:hover { color: var(--text); border-color: var(--blue); }
   .weekday-list { display: flex; flex-wrap: wrap; gap: 8px; }
   .weekday-item { display: flex; gap: 5px; align-items: center; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
   .next-run { font-size: 14px; line-height: 1.9; }
@@ -969,7 +975,7 @@ function renderSystemInfo(info) {
       <div class="card">
         <h2>Telegram 推送配置</h2>
         <div class="form-row"><label>启用 TG 推送</label><div><input type="checkbox" id="telegramEnabled" ${telegram.enabled ? 'checked' : ''}></div></div>
-        <div class="form-row"><label>Bot Token</label><div><input class="form-control" id="telegramBotToken" type="password" autocomplete="new-password" placeholder="${telegram.bot_token_configured ? '已配置，留空保持不变' : '请输入 BotFather Token'}"><div class="sub" style="margin-top:5px">Token 不会回显到页面或接口。</div></div></div>
+        <div class="form-row"><label>Bot Token</label><div><div class="secret-input-wrap"><input class="form-control" id="telegramBotToken" type="password" autocomplete="new-password" value="${escapeHtml(telegram.bot_token || '')}" placeholder="请输入 BotFather Token"><button class="secret-toggle" id="telegramTokenToggle" type="button" onclick="toggleTelegramToken()" aria-label="显示 Bot Token" title="显示 Bot Token">👁</button></div><div class="sub" style="margin-top:5px">默认隐藏；点击小眼睛显示或再次隐藏。</div></div></div>
         <div class="form-row"><label>Chat ID</label><div><input class="form-control" id="telegramChatId" type="text" value="${escapeHtml(telegram.chat_id)}" placeholder="例如 -1001234567890"></div></div>
         <div class="form-row"><label>正式/定时扫描</label><div><input type="checkbox" id="telegramNotifyFull" ${telegram.notify_full ? 'checked' : ''}> 完成后推送 Top N 结果</div></div>
         <div class="form-row"><label>测试扫描</label><div><input type="checkbox" id="telegramNotifyTest" ${telegram.notify_test ? 'checked' : ''}> 完成后也推送</div></div>
@@ -986,7 +992,7 @@ function renderSystemInfo(info) {
           <li>配置保存在 <code>data/config/telegram.json</code>，保存后无需重启。</li>
           <li>旧 <code>.env</code> 配置会作为首次默认值，保存后迁移到配置文件。</li>
         </ul>
-        <div class="notice" style="margin-top:16px">Bot Token 属于敏感凭据。页面只显示是否已配置，不会返回 Token 原文；留空保存表示继续使用现有 Token。</div>
+        <div class="notice" style="margin-top:16px">Bot Token 属于敏感凭据，仅登录后的配置页面可以读取。使用完显示功能后建议再次点击小眼睛隐藏。</div>
       </div>
     </div>
     <div class="grid-2" style="margin-top:16px">
@@ -1084,6 +1090,16 @@ async function saveSchedule() {
   } catch (error) {
     status.textContent = error.message;
   }
+}
+
+function toggleTelegramToken() {
+  const input = document.getElementById('telegramBotToken');
+  const button = document.getElementById('telegramTokenToggle');
+  const revealing = input.type === 'password';
+  input.type = revealing ? 'text' : 'password';
+  button.textContent = revealing ? '🙈' : '👁';
+  button.setAttribute('aria-label', revealing ? '隐藏 Bot Token' : '显示 Bot Token');
+  button.title = revealing ? '隐藏 Bot Token' : '显示 Bot Token';
 }
 
 async function saveTelegramSettings(sendTest) {

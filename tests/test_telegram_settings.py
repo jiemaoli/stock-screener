@@ -38,6 +38,8 @@ def test_telegram_settings_round_trip_and_hide_token(tmp_path, monkeypatch):
     public = public_telegram_settings(saved)
     assert public["bot_token_configured"] is True
     assert "bot_token" not in public
+    authenticated = public_telegram_settings(saved, include_token=True)
+    assert authenticated["bot_token"] == VALID_TOKEN
 
 
 def test_telegram_settings_fall_back_to_environment(tmp_path, monkeypatch):
@@ -141,3 +143,11 @@ def test_dashboard_telegram_update_keeps_existing_token(monkeypatch):
     assert saved[0]["bot_token"] == VALID_TOKEN
     assert saved[0]["chat_id"] == "-100456"
     assert "bot_token" not in response.get_json()["telegram"]
+
+
+def test_dashboard_contains_token_reveal_control():
+    import dashboard
+
+    assert 'id="telegramTokenToggle"' in dashboard.DASHBOARD_HTML
+    assert "function toggleTelegramToken()" in dashboard.DASHBOARD_HTML
+    assert "telegram.bot_token || ''" in dashboard.DASHBOARD_HTML

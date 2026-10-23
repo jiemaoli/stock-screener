@@ -85,13 +85,18 @@ def write_telegram_settings(settings: dict, path: Path = DEFAULT_PATH) -> dict:
     return normalized
 
 
-def public_telegram_settings(settings: dict | None = None) -> dict:
-    """Return UI-safe settings without exposing the bot token."""
+def public_telegram_settings(
+    settings: dict | None = None, *, include_token: bool = False
+) -> dict:
+    """Return UI settings, optionally including the token for authenticated pages."""
     settings = settings or read_telegram_settings()
-    return {
+    result = {
         "enabled": settings["enabled"],
         "chat_id": settings["chat_id"],
         "notify_full": settings["notify_full"],
         "notify_test": settings["notify_test"],
         "bot_token_configured": bool(settings["bot_token"]),
     }
+    if include_token:
+        result["bot_token"] = settings["bot_token"]
+    return result
